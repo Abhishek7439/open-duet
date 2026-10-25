@@ -11,8 +11,33 @@ The foundation migration uses additive columns and new tables, with an SQLite-sa
 A room is a shared conversation for selected agents, with shared instructions
 and one visible transcript. Create one from the Chat page's Rooms panel or let
 a Claude or Codex team lead create it with `create_room`. Choose one to twelve agents
-when creating it; the member list is fixed after creation. You can edit the
-room name, shared instructions and default responder setting later.
+when creating it. You can edit the
+room name, shared instructions, roster and default responder setting later.
+
+Room settings adds or removes members without deleting the conversation or any
+member's work history. Choose one to twelve distinct live agents you own; agents
+assigned to a team must belong to your team. Removing the default responder
+requires choosing another responder or a different response rule in the same save.
+Queued replies for a removed member are skipped. Running work must finish before
+removal: use Stop, wait for it to settle, then save. Stop keeps the dispatch busy
+while the provider is cancelling, including during startup, and discards late results.
+Roster changes appear as durable room notices. A concurrent roster edit refuses a
+stale save; reopen settings to review the current members.
+
+Re-adding a member reuses their existing work thread and history, clears Hold, and
+starts their next prompt with messages posted after rejoining. Missed messages and
+old queued or failed replies are not replayed. Existing conversation history stays
+in the room; a re-added member can explicitly search it. While removed, a member
+cannot post to the room, receive new room work, search its shared history, or create
+new memory from it. Previously learned notes are retained. Deleting the room cleans
+up work threads for both active and removed members.
+
+The HTTP roster edit is `PATCH /rooms/{id}` with `member_ids` and the unchanged
+`expected_member_ids` from the roster the person reviewed. The room-row lock
+serializes edits with message routing and dispatch claims. Responses use
+`roster_conflict`, `member_busy` or `invalid_responder` to explain refused edits.
+This source increment has automated SQLite coverage; real-provider and packaged
+app qualification remain separate gates.
 
 For a message without a tag, choose **Only tagged members**, **One member**, or
 **Everyone**. Tag an individual with `@name` or use `@everyone` to direct a
@@ -23,8 +48,7 @@ work. Owners can hold or resume a member, stop work, retry a failed dispatch,
 and export the room transcript as Markdown or JSON. Tool approvals still use
 each agent's normal approval mode.
 
-Room rosters cannot currently be edited after creation, and there is no
-model-based automatic responder for untagged messages.
+There is no model-based automatic responder for untagged messages.
 
 ## Handing work out without waiting
 

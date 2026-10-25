@@ -3,7 +3,7 @@ import json
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, StrictInt
 from sqlalchemy import select
 from app.db.models import Approval, RoomMember, RoomDispatch, Thread
 from app.db.transactions import begin_write
@@ -28,6 +28,8 @@ class CreateRoom(BaseModel):
 
 class UpdateRoom(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    member_ids: list[StrictInt] | None = Field(default=None, min_length=1, max_length=12)
+    expected_member_ids: list[StrictInt] | None = Field(default=None, min_length=1, max_length=12)
     name: str | None = Field(default=None, min_length=1, max_length=80)
     bulletin: str | None = Field(default=None, max_length=12000)
     default_responder_kind: Literal['member', 'everyone', 'mentions'] | None = None
@@ -144,7 +146,7 @@ async def approvals(room_id: int, rt=Depends(get_runtime)):
     try:
         async with rt.session() as db:
             await rt.rooms.get(db, room_id)
-            return list((await db.execute(select(Approval).join(RoomMember, RoomMember.member_thread_id == Approval.thread_id).where(RoomMember.room_id == room_id, Approval.status == 'pending').order_by(Approval.created_at))).scalars())
+            return list((await db.execute(select(Approval).join(RoomMember, RoomMember.member_thread_id == Approval.thread_id).where(RoomMember.room_id == room_id, RoomMember.removed_at.is_(None), Approval.status == 'pending').order_by(Approval.created_at))).scalars())
     except TeamError as exc:
         raise error(exc) from None
 
@@ -158,6 +160,9 @@ async def retry(room_id: int, dispatch_id: int, rt=Depends(get_runtime)):
             row = await db.get(RoomDispatch, dispatch_id)
             if row is None or row.room_id != room_id or row.status not in ('failed', 'stopped'):
                 raise HTTPException(409, 'Only failed or stopped replies can be retried.')
+            member = await db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.agent_id == row.agent_id, RoomMember.removed_at.is_(None)))
+            if member is None or row.error_code == 'member_removed':
+                raise HTTPException(409, 'Removed member work cannot be retried. Send a new message after re-adding them.')
             # Explicit person action resets the existing unique delivery row;
             # it never creates duplicate delivery identities.
             row.status, row.reason, row.turn_id, row.error_code = 'queued', 'retry', None, None

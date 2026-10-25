@@ -11,6 +11,10 @@
   SQLite/scripted-engine and cross-worker file-lock tests cover the workflow;
   real-provider, Windows and packaged UI qualification remain open.
 
+- Edit an existing room's roster while keeping conversation and work history.
+  Removal skips queued replies, refuses members whose work is still settling,
+  and records a room notice. Re-adding reuses history without replaying old work;
+  stale concurrent roster edits are refused.
 - Routine changes made through chat have dedicated result cards and owner-only
   Undo. Undo refuses stale settings or executions and restores definitions paused,
   without replaying runs or restoring webhook grants/history.

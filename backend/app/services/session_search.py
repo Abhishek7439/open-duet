@@ -105,7 +105,7 @@ async def _scope(db, owner_id: str, agent_id: int):
             await db.execute(
                 select(Room)
                 .join(RoomMember, RoomMember.room_id == Room.id)
-                .where(Room.owner_id == owner_id, RoomMember.agent_id == agent_id, Room.archived_at.is_(None))
+                .where(Room.owner_id == owner_id, RoomMember.agent_id == agent_id, RoomMember.removed_at.is_(None), Room.archived_at.is_(None))
             )
         ).scalars()
     }

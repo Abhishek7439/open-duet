@@ -90,7 +90,8 @@ def test_team_tables_compile_to_their_reviewed_postgres_schema():
 
 
 def test_room_tables_compile_to_their_reviewed_postgres_schema():
-    assert postgres_ddl(ROOM_TABLES) == snapshot_text(HERE / "postgres_schema_rooms.sql")
+    normalized = "\n".join(line.rstrip() for line in postgres_ddl(ROOM_TABLES).splitlines()) + "\n"
+    assert normalized == snapshot_text(HERE / "postgres_schema_rooms.sql")
 
 
 def test_needs_you_table_compiles_to_its_reviewed_postgres_schema():

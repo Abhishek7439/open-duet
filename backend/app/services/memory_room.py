@@ -69,7 +69,7 @@ async def live_room(db, owner_id: str, room_thread_id: int, agent_id: int) -> Ro
     room = await db.scalar(select(Room).where(Room.thread_id == room_thread_id, Room.owner_id == owner_id))
     if room is None or room.deleting_at is not None or room.archived_at is not None:
         return None
-    member = await db.scalar(select(RoomMember).where(RoomMember.room_id == room.id, RoomMember.agent_id == agent_id))
+    member = await db.scalar(select(RoomMember).where(RoomMember.room_id == room.id, RoomMember.agent_id == agent_id, RoomMember.removed_at.is_(None)))
     return room if member is not None else None
 
 
