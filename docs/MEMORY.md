@@ -622,3 +622,26 @@ adds `agent.memory_upkeep`, `a5c3e8b1d7f2` adds `agent.compaction_summary` and
 - Recall ranks by shared words only (no stemming, no embeddings), so a
   question worded differently from the note can miss it.
 - Proposals are found when the queue is looked at, not pushed.
+
+## Explicit private remember requests (2026-10-25)
+
+Send a standalone `Remember that my favorite color is teal` message to a named
+agent to save that literal fact before the engine answers. This path runs in
+the app, so it works on Codex without a helper and with automatic upkeep off.
+Notes must be enabled. It accepts one plain line of at most 1,000 characters;
+text that resembles a secret is refused. Pasted multiline content, room turns,
+routines, webhooks and delegated jobs cannot use this path. It writes only the
+agent's private `MEMORY.md`, never shared team memory.
+
+The note includes the source conversation and turn IDs, and the change appears
+in the existing Notes journal with Undo. Repeating an identical fact does not
+append it again. A new simple `my <subject> is/are <value>` fact supersedes an
+older dated fact with the same subject, preserving the old line struck through;
+Undo restores the earlier notes. More complex corrections still need review in
+the Notes panel. Successful writes and failures produce factual instructions to
+the answering engine; it must distinguish a saved note from conversation recall
+and report an unavailable write instead of claiming it remembered something.
+
+This is source and automated coverage, including a fake Codex process and
+fresh-chat note recall. Live-provider response truthfulness and packaged-app
+qualification remain separate checks.

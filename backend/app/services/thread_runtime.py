@@ -27,7 +27,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core import app_settings
 from app.core.logging import get_logger
-from app.services import agent_memory, agent_skills, agent_store, attachments, context_compaction, memory_entries, memory_journal, memory_log, memory_recall, recent_work
+from app.services import agent_memory, agent_skills, agent_store, attachments, context_compaction, memory_entries, memory_explicit, memory_journal, memory_log, memory_recall, recent_work
 from app.db.models import Room
 from app.db.transactions import begin_write
 from app.services import side_jobs
@@ -763,6 +763,7 @@ class ThreadRuntime:
                 await run.recorder.emit("context.compacted", plan.record)
             return plan.items
 
+        explicit_memory = memory_explicit.prepare(agent, thread, turn, internal=internal)
         ctx = TurnContext(
             thread_id=thread_id,
             turn_id=turn.id,
@@ -783,7 +784,12 @@ class ThreadRuntime:
             resume=thread.session_state == "active",
             history=history,
             # The agent's instructions, then its notes (MEMORY.md) when on.
-            instructions=_with_brief(agent_memory.turn_instructions(agent) if agent is not None else None, brief),
+            instructions=_with_brief(
+                "\n\n".join(filter(None, (
+                    agent_memory.turn_instructions(agent) if agent is not None else None,
+                    explicit_memory,
+                ))) or None, brief,
+            ),
             approval_mode=approval_mode
             if approval_mode is not None
             else (agent.approval_mode if agent is not None else None),

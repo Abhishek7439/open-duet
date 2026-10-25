@@ -116,3 +116,37 @@ async def test_a_memory_call_is_allowed_without_a_card_and_anything_else_still_i
 
     async with sessions() as db:
         assert await store.list_approvals(db, thread.id) == []  # no card for any of them
+
+
+async def test_codex_literal_memory_write_needs_no_helper_and_fresh_chat_has_note(crt, sessions, owner, codex, monkeypatch, tmp_path):
+    from app.services import agent_memory, memory_entries, memory_journal, session_search, side_jobs
+
+    monkeypatch.setattr(memory_journal, 'state_root', lambda: tmp_path / 'state')
+    monkeypatch.setattr(side_jobs, 'configured', lambda: None)
+    agent = await _agent(sessions, owner, 'codex', memory_upkeep=False)
+    thread = await crt.create_thread(provider='codex', agent_id=agent.id)
+    await crt.send_turn(thread.id, 'Remember that my favorite color is teal')
+    await finished(sessions, thread.id)
+    text = agent_memory.read_memory(agent.id).text
+    assert 'my favorite color is teal' in text and f'thread {thread.id}, turn ' in text
+    initial = codex.received('thread/start')[0]['params']['developerInstructions']
+    assert 'Receipt:' in initial and 'was saved' in initial
+    assert 'my favorite color is teal' in initial
+    fresh = await crt.create_thread(provider='codex', agent_id=agent.id)
+    await crt.send_turn(fresh.id, 'What is my favorite color?')
+    await finished(sessions, fresh.id)
+    instructions = codex.received('thread/start')[1]['params']['developerInstructions']
+    assert 'my favorite color is teal' in instructions
+    async with sessions() as db:
+        found = await session_search.search(
+            db, owner_id=owner, agent_id=agent.id, current_thread_id=fresh.id,
+            query='favorite color', scope='memory',
+        )
+    assert not found.conversations
+    assert any(note.path == 'MEMORY.md' and f'thread {thread.id}, turn ' in note.snippet for note in found.memory)
+    await crt.send_turn(fresh.id, 'Remember that my favorite color is blue')
+    await finished(sessions, fresh.id, count=2)
+    current = agent_memory.read_memory(agent.id).text
+    assert 'my favorite color is teal' not in memory_entries.without_superseded(current)
+    memory_journal.undo(agent.id, memory_journal.read(agent.id)[0]['id'])
+    assert agent_memory.read_memory(agent.id).text == text

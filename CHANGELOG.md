@@ -11,6 +11,9 @@
   receipts so concurrent or restarted sender retries return the original run
   without executing it again. Reusing a key with changed content is rejected.
 
+### Fixed
+- Standalone `Remember that <one fact>` requests save journaled private agent notes before the engine answers, including Codex without a helper. Exact repeats are idempotent; simple first-person corrections supersede earlier notes and support Undo. Secret-looking facts and shared/externally started turns are excluded. Engines receive a success or failure receipt and guidance to distinguish saved notes from conversation recall. Source and fake-process SQLite tests cover this path; live-provider and packaged behavior remain unqualified.
+
 ## v0.4.0 (2026-10-25)
 
 ### Added
