@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.db.models import (
-    Agent, Event, NeedsYouState, Notification, Routine, RoutineRun, Team, Turn,
+    Agent, AgentJob, Event, NeedsYouState, Notification, Routine, RoutineRun, Team, Turn, WorkColumn,
 )
 from app.services import agent_store
 from app.services import thread_store as store
@@ -31,6 +31,12 @@ class Clock:
 
     def advance(self, **delta):
         self.now += timedelta(**delta)
+
+
+@pytest.fixture(autouse=True)
+def workspace(monkeypatch, tmp_path):
+    from app.services import local_claude_runner
+    monkeypatch.setattr(local_claude_runner, 'workspace_dir', lambda: tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -302,3 +308,73 @@ async def test_routes_read_and_presence(sessions, rt, owner, lead):
         assert ok.status_code == 200 and ok.json()["returned"] is True and ok.json()["open"] is None  # nothing to say
     async with sessions() as db:
         assert (await db.get(NeedsYouState, owner)).time_zone == "Europe/Paris"
+
+
+async def test_local_completions_use_owner_day_and_refresh_quietly(sessions, rt, owner, lead):
+    # 20:00 UTC belongs to tomorrow in Kolkata but today in Los Angeles.
+    clock = Clock(datetime(2026, 10, 24, 20, tzinfo=UTC))
+    routine = await routine_with_runs(sessions, owner, lead, "completed", "completed")
+    async with sessions() as db:
+        runs = list((await db.scalars(select(RoutineRun).where(RoutineRun.routine_id == routine.id))).all())
+        for run in runs:
+            run.finished_at = clock.now - timedelta(minutes=5)
+        await db.commit()
+    ny = make(rt, clock)
+    opened = await ny.presence("Asia/Kolkata")
+    thread_id = opened["open"]["thread_id"]
+    card = (await events(sessions, thread_id))[-1].data
+    assert card["title"] == "Today" and card["day"] == "2026-10-25"
+    assert len(card["items"]) == 1 and "2 completed today" in card["items"][0]["title"]
+    assert card["items"][0]["routine_id"] == routine.id
+    assert card["items"][0]["source"] == "Routine runs"
+    assert card["sources"] == {"local": "available", "calendar": "unavailable", "gmail": "unavailable"}
+    clock.advance(minutes=1)
+    await ny.tick()
+    assert len(await events(sessions, thread_id)) == 1
+    async with sessions() as db:
+        assert not list((await db.scalars(select(Notification).where(Notification.owner_id == owner))).all())
+
+
+async def test_questions_and_recorded_engine_failure_survive_new_brief_instance(sessions, rt, owner, lead):
+    thread = await rt.create_thread(agent_id=lead.id)
+    async with sessions() as db:
+        turn = await store.start_turn(db, thread.id, "go", owner_instance="t")
+        turn.status, turn.finished_at, turn.error_code = "failed", T0, "engine_limited"
+        job = AgentJob(owner_id=owner, requester_agent_id=lead.id, requester_thread_id=thread.id,
+                       requester_turn_id=turn.id, assignee_agent_id=lead.id, assignee_thread_id=thread.id,
+                       status="needs_input", reply="resume", brief="Review", brief_hash="x",
+                       question="Which environment?", last_activity_at=T0)
+        db.add(job)
+        await db.commit()
+    ny = make(rt, Clock())
+    card = await ny.read()
+    assert {row["kind"] for row in card["items"]} == {"question", "usage_limit"}
+    assert all(row["thread_id"] == thread.id and row["at"] for row in card["items"])
+    async with sessions() as db:
+        later = await store.start_turn(db, thread.id, "retry", owner_instance="t")
+        later.status, later.finished_at = "succeeded", T0 + timedelta(minutes=1)
+        job = await db.get(AgentJob, job.id)
+        job.status = "completed"
+        await db.commit()
+    assert (await make(rt, Clock(T0 + timedelta(minutes=2))).read())["items"] == []
+
+
+async def test_due_tasks_are_inert_and_exclude_done_and_other_owners(sessions, rt, owner, lead):
+    from app.services import work_planner
+    async with sessions() as db:
+        board = await work_planner.default_board(db, owner)
+        columns = {c.key: c.id for c in (await db.scalars(select(WorkColumn).where(WorkColumn.board_id == board.id))).all()}
+        task = await work_planner.create_item(db, owner, {"board_id": board.id, "column_id": columns["backlog"],
+            "title": "Review deployment", "due_date": T0.date(), "timezone": "UTC"})
+        await work_planner.create_item(db, owner, {"board_id": board.id, "column_id": columns["done"],
+            "title": "Finished", "due_date": T0.date(), "timezone": "UTC"})
+        other_board = await work_planner.default_board(db, owner + "-other")
+        other_column = await db.scalar(select(WorkColumn.id).where(WorkColumn.board_id == other_board.id).limit(1))
+        await work_planner.create_item(db, owner + "-other", {"board_id": other_board.id, "column_id": other_column,
+            "title": "Private other task", "due_date": T0.date(), "timezone": "UTC"})
+    card = await make(rt, Clock()).read()
+    due = [row for row in card["items"] if row["kind"] == "due"]
+    assert len(due) == 1 and due[0]["work_item_id"] == task.id
+    assert due[0]["thread_id"] is None
+    async with sessions() as db:
+        assert not list((await db.scalars(select(Routine).where(Routine.owner_id == owner))).all())

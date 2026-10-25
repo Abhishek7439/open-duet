@@ -2,7 +2,7 @@
 from sqlalchemy import func, select
 
 from app.db.models import Agent, Routine
-from app.db.models.routine import ACTIVE_RUN_STATES, RoutineRun
+from app.db.models.routine import RoutineRun
 from app.services import routine_service
 from app.team import service, setup
 
@@ -28,6 +28,7 @@ async def capture(db, routine, action):
     safe = setup.redacted(before)
     return {'routine_id': routine.id, 'agent_id': routine.agent_id, 'action': action,
             'before': safe if safe == before else None,
+            'had_active_run': await routine_service._has_active_run(db, routine.id),
             'runs': await runs_marker(db, routine.id)}
 
 
@@ -37,6 +38,8 @@ async def status(db, receipt, *, lock=False):
     entry = receipt.undo or {}
     if not entry or entry.get('before') is None:
         return {'available': False, 'reason': 'Undo is unavailable for settings containing secret-looking text.'}
+    if entry.get('had_active_run'):
+        return {'available': False, 'reason': 'A run was already queued or active when this change was made.'}
     team = await service.team_for(db, receipt.owner_id)
     agent = await db.get(Agent, entry['agent_id'], with_for_update=lock, populate_existing=True)
     if (team is None or team.id != receipt.team_id or agent is None or

@@ -15,7 +15,7 @@ async def change(harness, action='create'):
     async def operation(rt, run, worker):
         made = await management.call(rt, run, 'create_routine', {
             'agent_id': worker.id, 'name': 'Morning', 'prompt': 'Read the provided files.',
-            'schedule_kind': 'daily', 'schedule_spec': {'time': '09:00'}, 'timezone': 'Asia/Kolkata'})
+            'schedule_kind': 'cron', 'schedule_spec': {'expression': '0 9 * * *'}, 'timezone': 'Asia/Kolkata'})
         if action == 'create':
             return made
         routine = made['routine']
@@ -103,3 +103,23 @@ async def test_deleted_history_is_not_advertised_as_restorable(harness, sessions
         status = await setup.undo_status(db, receipt)
         assert not status['available'] and 'history' in status['reason']
         assert await db.get(Routine, result['routine']['id']) is None
+
+
+async def test_change_during_an_existing_run_stays_non_undoable_after_it_finishes(harness, sessions, owner):
+    async def operation(rt, run, worker):
+        made = await management.call(rt, run, 'create_routine', {'agent_id': worker.id, 'name': 'Busy', 'prompt': 'Read files'})
+        async with sessions() as db:
+            db.add(RoutineRun(routine_id=made['routine']['id'], state='running', trigger='manual'))
+            await db.commit()
+        return await management.call(rt, run, 'manage_routine', {'agent_id': worker.id,
+            'routine_id': made['routine']['id'], 'action': 'pause', 'expected_revision': made['routine']['revision']})
+    result = await run_tools(harness, operation)
+    async with sessions() as db:
+        run = await db.scalar(select(RoutineRun).where(RoutineRun.routine_id == result['routine']['id']))
+        run.state = 'completed'
+        await db.commit()
+        receipt = await setup.existing(db, owner, result['request_id'])
+        check = await setup.undo_status(db, receipt)
+        assert not check['available'] and 'already queued or active' in check['reason']
+        with pytest.raises(service.TeamError):
+            await setup.undo(db, owner, result['request_id'])

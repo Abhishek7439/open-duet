@@ -45,3 +45,17 @@ test('the summary counts the hidden rows too', () => {
   assert.equal(summary(1, 0), '1 thing needs you');
   assert.equal(summary(6, 3), '9 things need you');
 });
+
+test('Today keeps source freshness and routes to the exact routine or task', () => {
+  const data = { ...card(1, [{ ...row('completed:7', 'routine_completed'), routine_id: 7,
+    source: 'Routine runs', at: '2026-10-24T10:00:00Z' }]), title: 'Today',
+    checked_at: '2026-10-24T10:01:00Z', time_zone: 'Asia/Kolkata',
+    sources: { calendar: 'unavailable', gmail: 'unavailable', local: 'available' } };
+  const item = applyEvent(emptyTranscript(), ev(data)).items[0];
+  assert.equal(item.checkedAt, data.checked_at);
+  assert.equal(item.timeZone, data.time_zone);
+  assert.equal(item.rows[0].source, 'Routine runs');
+  assert.equal(item.rows[0].at, data.items[0].at);
+  assert.deepEqual(rowAction(item.rows[0]), { label: 'View runs', href: '/chat?view=routines&routine=7' });
+  assert.deepEqual(rowAction({ ...row('due:8', 'due'), work_item_id: 8 }), { label: 'Review task', href: '/chat?view=planner&task=8' });
+});

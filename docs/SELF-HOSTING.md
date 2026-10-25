@@ -348,11 +348,36 @@ backend; errors stop launch. It reports network access as **unrestricted**.
 The optional Linux test in `tests/core/test_turn_sandbox.py` additionally checks
 workspace writes; it is skipped on hosts without Linux/bubblewrap.
 
-This is stage C only. Network namespaces with a filtered egress bridge (stage
-D), credential brokering and syscall filtering remain open. An engine can
-still reach loopback, the server API and metadata over the shared network;
-provider account credentials granted to the box remain readable. Do not claim
+Stage C alone still allows loopback, the server API and metadata over the
+shared network. The separate stage D preview below restricts turn networking.
+Credential brokering and syscall filtering remain open; provider account
+credentials granted to either box remain readable. Do not claim
 isolation for hostile unattended integrations until C and D pass a real Linux
 host qualification, including engine sign-in/resume, approvals, stop/timeouts
 and orphan cleanup. The preview has automated mount/refusal coverage; no real
 Linux or packaged-provider qualification is recorded here.
+
+### Optional network isolation (stage D preview)
+
+Set `TURN_SANDBOX_NETWORK_ENABLED=true` alongside `TURN_SANDBOX_ENABLED=true`
+to create a private network namespace. A per-turn loopback HTTP proxy bridges
+to a backend-created UNIX socket; no host TCP listener is exposed. The host
+gate resolves names, refuses an entire answer containing any private,
+loopback, link-local, reserved, metadata or local-interface address, and
+connects to the checked numeric address without resolving it again. Only
+ports 80 and 443 are admitted. TLS uses CONNECT, without decryption.
+
+The turn receives HTTP/HTTPS proxy variables with proxy bypass variables
+removed. A program ignoring them has no direct network route. Direct DNS,
+UDP, SSH, private services, local model endpoints and custom ports are
+unavailable in this mode. OpenAI-compatible HTTP calls made by the backend
+and engine status/sign-in probes are outside the turn box. This is public
+egress filtering, not a provider-domain allowlist or a credential broker.
+
+The preflight additionally checks that the network namespace differs from
+the host. Missing prerequisites, gate or bridge failures stop launch without
+an unboxed retry. Supervisor tests exercise stdio and temporary socket cleanup;
+policy tests cover mixed DNS answers, numeric-address pinning and HTTP/TLS
+transport. Actual namespace enforcement and engine proxy compatibility,
+sign-in/resume, approval delivery, stop/timeouts and orphan cleanup still need
+qualification on real Linux. Keep the preview off until that host is qualified.

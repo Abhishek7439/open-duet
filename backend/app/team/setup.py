@@ -215,7 +215,7 @@ def replay(row):
 
 
 async def existing(db, owner, request_id):
-    return await db.scalar(select(TeamSetupRequest).where(TeamSetupRequest.owner_id == owner, TeamSetupRequest.request_id == request_id))
+    return await db.scalar(select(TeamSetupRequest).where(TeamSetupRequest.owner_id == owner, TeamSetupRequest.request_id == request_id).execution_options(populate_existing=True))
 
 
 async def propose(db, owner, caller_id, turn_id, thread_id, plan, *, check_engine, request_id=None, authorize=None, guided=False):
@@ -291,8 +291,9 @@ async def undo(db, owner, request_id):
         await db.rollback()
         raise TeamError('request_not_found', 'No such team change to undo.')
     if row.state != 'applied':
+        code = 'already_undone' if row.state == 'undone' else 'not_undoable'
         await db.rollback()
-        raise TeamError('already_undone' if row.state == 'undone' else 'not_undoable', 'This change cannot be undone.')
+        raise TeamError(code, 'This change cannot be undone.')
     if row.kind == 'routine':
         from app.team import routine_changes
         from app.services.routine_service import InvalidRoutine

@@ -20,10 +20,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 
 from app.db.models import (AgentJob, Approval, NeedsYouState, Routine, RoutineRun,
-                           Team, Thread, Turn, WorkColumn, WorkItem)
+                           Team, Thread, Turn, WorkColumn, WorkItem, WorkItemRun)
 from app.db.transactions import begin_write
 from app.services import notification_feed, sentinel
 from app.services import thread_store as store
@@ -151,7 +151,8 @@ async def collect(db, owner_id: str, *, now: datetime, engines: list[dict],
                           _aware(approval.created_at)))
 
     routines = {r.id: r for r in (await db.execute(
-        select(Routine).where(Routine.owner_id == owner_id))).scalars()}
+        select(Routine).where(Routine.owner_id == owner_id,
+            ~exists().where(WorkItemRun.routine_id == Routine.id)))).scalars()}
     runs = (await db.execute(
         select(RoutineRun).where(RoutineRun.routine_id.in_(list(routines) or [0]),
                                  RoutineRun.created_at >= since).order_by(RoutineRun.id)
@@ -249,6 +250,7 @@ async def collect_local(db, owner_id: str, *, now: datetime, zone: ZoneInfo,
     results = (await db.execute(select(Routine.id, Routine.name, func.count(RoutineRun.id),
         func.max(RoutineRun.finished_at)).join(RoutineRun, RoutineRun.routine_id == Routine.id)
         .where(Routine.owner_id == owner_id, RoutineRun.state == "completed",
+               ~exists().where(WorkItemRun.routine_id == Routine.id),
                RoutineRun.finished_at >= midnight, RoutineRun.finished_at <= now)
         .group_by(Routine.id, Routine.name).order_by(func.max(RoutineRun.finished_at).desc(), Routine.id)
         .limit(100))).all()
