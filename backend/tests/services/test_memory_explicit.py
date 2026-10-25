@@ -88,3 +88,44 @@ def test_internal_turn_cannot_write_even_with_person_origin(storage):
     )
     assert 'Receipt:' not in result
     assert not agent_memory.read_memory(1).text
+
+
+def test_disabled_notes_explicit_request_reports_no_persistence(storage):
+    result = request('Remember that my favorite color is teal', enabled=False)
+    assert 'not saved' in result and 'notes are switched off' in result
+    assert not agent_memory.read_memory(1).text
+
+
+def test_source_title_is_redacted_before_truncation_or_journaling(storage):
+    secret = 'sk-abcdefghijklmnopqrstuvwxyz1234567890123456789012345678901234567890'
+    memory_explicit.prepare(
+        SimpleNamespace(id=1, memory_enabled=True),
+        SimpleNamespace(id=11, title='Project ' + secret, kind='chat', job_id=None),
+        SimpleNamespace(id=23, prompt_text='Remember that my favorite color is teal', origin='person'),
+    )
+    text = agent_memory.read_memory(1).text
+    assert '[redacted]' in text and 'sk-abc' not in text
+    journal = memory_journal.journal_path(1).read_text()
+    assert secret not in journal and 'sk-abc' not in journal
+
+
+@pytest.mark.parametrize('conflict', [False, True])
+def test_failed_journal_and_rollback_report_ambiguous_persistence(storage, monkeypatch, conflict):
+    original = agent_memory.write_memory
+    writes = 0
+
+    def write(*args, **kwargs):
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            if conflict:
+                raise agent_memory.MemoryConflict(agent_memory.read_memory(1))
+            raise OSError('disk full during rollback')
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(agent_memory, 'write_memory', write)
+    monkeypatch.setattr(memory_journal, 'record', lambda *a, **k: None)
+    result = request('Remember that my favorite color is teal')
+    assert 'may have persisted' in result and 'Undo is unavailable' in result
+    assert 'This request was not saved' not in result
+    assert 'my favorite color is teal' in agent_memory.read_memory(1).text

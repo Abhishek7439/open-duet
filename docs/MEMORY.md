@@ -640,7 +640,11 @@ older dated fact with the same subject, preserving the old line struck through;
 Undo restores the earlier notes. More complex corrections still need review in
 the Notes panel. Successful writes and failures produce factual instructions to
 the answering engine; it must distinguish a saved note from conversation recall
-and report an unavailable write instead of claiming it remembered something.
+and report an unavailable write instead of claiming it remembered something. An
+explicit request with Notes off receives a notes-disabled receipt. If journaling
+and rollback both fail, the receipt says the note may have persisted and Undo
+is unavailable, and asks you to inspect Notes. Conversation titles in provenance
+are redacted before they are stored.
 
 This is source and automated coverage, including a fake Codex process and
 fresh-chat note recall. Live-provider response truthfulness and packaged-app

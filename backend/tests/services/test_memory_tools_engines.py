@@ -150,3 +150,15 @@ async def test_codex_literal_memory_write_needs_no_helper_and_fresh_chat_has_not
     assert 'my favorite color is teal' not in memory_entries.without_superseded(current)
     memory_journal.undo(agent.id, memory_journal.read(agent.id)[0]['id'])
     assert agent_memory.read_memory(agent.id).text == text
+
+
+async def test_codex_explicit_request_with_notes_off_reports_limitation(crt, sessions, owner, codex):
+    from app.services import agent_memory
+
+    agent = await _agent(sessions, owner, 'codex', memory_enabled=False)
+    thread = await crt.create_thread(provider='codex', agent_id=agent.id)
+    await crt.send_turn(thread.id, 'Remember that my favorite color is teal')
+    await finished(sessions, thread.id)
+    instructions = codex.received('thread/start')[0]['params']['developerInstructions']
+    assert 'not saved' in instructions and 'notes are switched off' in instructions
+    assert not agent_memory.read_memory(agent.id).text

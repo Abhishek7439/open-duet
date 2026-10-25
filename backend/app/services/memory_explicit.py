@@ -22,9 +22,13 @@ TRUTH_NOTE = (
 
 def prepare(agent, thread, turn, *, internal: bool = False) -> str:
     """Return factual per-turn instructions; write only eligible literal requests."""
-    if agent is None or not agent.memory_enabled:
+    if agent is None:
         return ""
     match = _REQUEST.fullmatch(turn.prompt_text.strip())
+    if not agent.memory_enabled:
+        if match and not internal and thread.kind == "chat" and thread.job_id is None and turn.origin == "person":
+            return TRUTH_NOTE + " This request was not saved: private notes are switched off. Tell the person to enable Notes before requesting persistence."
+        return ""
     if internal or not match or thread.kind != "chat" or thread.job_id is not None or turn.origin != "person":
         return TRUTH_NOTE
     fact = match.group(1).strip()
@@ -49,13 +53,21 @@ def prepare(agent, thread, turn, *, internal: bool = False) -> str:
                 previous = _SUBJECT.fullmatch(entry.body)
                 if not entry.struck and previous and previous.group(1).casefold() == key and entry.end == entry.start + 1:
                     lines[entry.start] = f"{entry.prefix}~~{entry.body}~~ · superseded {day}"
-        source = memory_entries.source_label(thread.title, thread.id)
+        title, _ = agent_memory.redact_secrets(thread.title or "")
+        source = memory_entries.source_label(title, thread.id)
         source += f" (thread {thread.id}, turn {turn.id})"
         lines.append(memory_entries.entry_line(clean, source=source, day=day))
         saved, _ = agent_memory.write_memory(agent.id, "\n".join(lines) + "\n", expected_hash=before.hash)
         row = memory_journal.record(agent.id, "MEMORY.md", actor="person", via="explicit", before=before.text, after=saved.text)
         if row is None:
-            agent_memory.write_memory(agent.id, before.text, expected_hash=saved.hash)
+            try:
+                agent_memory.write_memory(agent.id, before.text, expected_hash=saved.hash)
+            except (OSError, ValueError, agent_memory.MemoryConflict):
+                return TRUTH_NOTE + (
+                    " The note may have persisted, but its change could not be journaled and rollback failed. "
+                    "Undo is unavailable for this change. Ask the person to check the Notes panel; "
+                    "do not claim either a complete save or no persistence."
+                )
             return TRUTH_NOTE + " This request was not saved: its change could not be journaled."
         return TRUTH_NOTE + (
             f" Receipt: the person's literal fact was saved in this agent's private MEMORY.md "
