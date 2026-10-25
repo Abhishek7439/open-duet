@@ -66,7 +66,22 @@ def test_numeric_connect_uses_the_checked_answer_without_resolving_again(monkeyp
     assert calls == [('93.184.216.34', 443)]
 
 
-def exchange(request, monkeypatch, *, upstream=False):
+FORBIDDEN = b'HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'
+
+
+def receive_response(client, *, expected=None):
+    response = bytearray()
+    while expected is None or len(response) < len(expected):
+        chunk = client.recv(65536)
+        if not chunk:
+            break
+        response.extend(chunk)
+    if expected is not None:
+        assert bytes(response) == expected
+    return bytes(response)
+
+
+def exchange(request, monkeypatch, *, upstream=False, expected_response=None):
     """Real duplex socket transport, without making an internet connection."""
     client, worker = socket.socketpair()
     failures = []
@@ -94,9 +109,7 @@ def exchange(request, monkeypatch, *, upstream=False):
         client.settimeout(5)
         client.sendall(request)
         client.shutdown(socket.SHUT_WR)
-        response = bytearray()
-        while chunk := client.recv(65536):
-            response.extend(chunk)
+        response = receive_response(client, expected=expected_response)
     for thread in threads:
         thread.join(5)
         assert not thread.is_alive()
@@ -126,7 +139,38 @@ def test_http_refusal_never_connects_to_private_or_invalid_target(monkeypatch, p
 
 
 def test_oversized_headers_refused(monkeypatch):
-    assert exchange(b'GET http://x/ HTTP/1.1\r\nLarge: ' + b'x' * gate.HEADER_LIMIT + b'\r\n\r\n', monkeypatch).startswith(b'HTTP/1.1 403')
+    monkeypatch.setattr(gate, 'connect_public', lambda *a: pytest.fail('must not connect'))
+    # The bounded parser leaves unread request bytes. Linux may reset the
+    # socket on close after delivering this complete Content-Length: 0 frame;
+    # the response is complete without another recv waiting for EOF.
+    assert exchange(b'GET http://x/ HTTP/1.1\r\nLarge: ' + b'x' * gate.HEADER_LIMIT + b'\r\n\r\n',
+                    monkeypatch, expected_response=FORBIDDEN) == FORBIDDEN
+
+
+def test_complete_refusal_does_not_require_eof():
+    reads = iter([FORBIDDEN])
+    def recv(_size):
+        try:
+            return next(reads)
+        except StopIteration:
+            raise ConnectionResetError('peer closed with unread request bytes')
+    assert receive_response(SimpleNamespace(recv=recv), expected=FORBIDDEN) == FORBIDDEN
+
+
+@pytest.mark.parametrize('received', [b'', b'HTTP/1.1 403', FORBIDDEN[:-1],
+                                       FORBIDDEN.replace(b'403', b'502'), FORBIDDEN + b'extra'])
+@pytest.mark.parametrize('reset', [False, True])
+def test_incomplete_or_different_refusal_still_fails(received, reset):
+    reads = iter([received])
+    def recv(_size):
+        try:
+            return next(reads)
+        except StopIteration:
+            if reset:
+                raise ConnectionResetError('peer reset')
+            return b''
+    with pytest.raises((AssertionError, ConnectionResetError)):
+        receive_response(SimpleNamespace(recv=recv), expected=FORBIDDEN)
 
 
 @pytest.fixture
