@@ -229,3 +229,52 @@ def test_a_statement_with_a_secret_is_never_proposed():
 def test_a_statement_already_in_the_notes_is_not_proposed():
     agent_memory.write_memory(7, "- I prefer aisle seats\n")
     assert memory_proposals.propose(7, thread_id=3, title="T", turns=[(1, "I prefer aisle seats")]) == []
+
+
+def test_stale_topic_undo_preserves_newer_edit_then_reverse_order_works():
+    memory_topics.write_topic(7, 'trip.md', 'Lisbon')
+    first = memory_journal.record(7, 'memory/trip.md', actor='person', before=None, after='Lisbon')
+    memory_topics.write_topic(7, 'trip.md', 'Porto')
+    second = memory_journal.record(7, 'memory/trip.md', actor='person', before='Lisbon', after='Porto')
+    with pytest.raises(memory_journal.CannotUndo, match='changed after'):
+        memory_journal.undo(7, first['id'])
+    assert memory_topics.read_topic(7, 'trip.md').text == 'Porto'
+    memory_journal.undo(7, second['id'])
+    memory_journal.undo(7, first['id'])
+    assert not memory_topics.read_topic(7, 'trip.md').exists
+
+
+@pytest.mark.parametrize('kind', ['memory', 'topic_write', 'topic_delete'])
+def test_undo_checks_hash_again_at_mutation(monkeypatch, kind):
+    if kind == 'memory':
+        agent_memory.write_memory(7, 'Current')
+        row = memory_journal.record(7, 'MEMORY.md', actor='person', before='Before', after='Current')
+        original = agent_memory.write_memory
+        def changed(*args, **kwargs):
+            original(7, 'Concurrent')
+            return original(*args, **kwargs)
+        monkeypatch.setattr(agent_memory, 'write_memory', changed)
+    else:
+        memory_topics.write_topic(7, 'trip.md', 'Current')
+        before = None if kind == 'topic_delete' else 'Before'
+        row = memory_journal.record(7, 'memory/trip.md', actor='person', before=before, after='Current')
+        original_write = memory_topics.write_topic
+        original_mutation = memory_topics.delete_topic if kind == 'topic_delete' else original_write
+        def changed(*args, **kwargs):
+            original_write(7, 'trip.md', 'Concurrent')
+            return original_mutation(*args, **kwargs)
+        monkeypatch.setattr(memory_topics, 'delete_topic' if kind == 'topic_delete' else 'write_topic', changed)
+    with pytest.raises(memory_journal.CannotUndo, match='changed while'):
+        memory_journal.undo(7, row['id'])
+    current = agent_memory.read_memory(7).text if kind == 'memory' else memory_topics.read_topic(7, 'trip.md').text
+    assert current == 'Concurrent'
+
+
+def test_stale_undo_of_topic_deletion_preserves_recreated_note():
+    memory_topics.write_topic(7, 'trip.md', 'Lisbon')
+    memory_topics.delete_topic(7, 'trip.md')
+    row = memory_journal.record(7, 'memory/trip.md', actor='person', before='Lisbon', after=None)
+    memory_topics.write_topic(7, 'trip.md', 'New plan')
+    with pytest.raises(memory_journal.CannotUndo, match='changed after'):
+        memory_journal.undo(7, row['id'])
+    assert memory_topics.read_topic(7, 'trip.md').text == 'New plan'

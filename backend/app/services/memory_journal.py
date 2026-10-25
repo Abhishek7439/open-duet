@@ -189,7 +189,8 @@ def _current(agent_id: int, path: str) -> str | None:
 
 def undo(agent_id: int, entry_id: str) -> dict | None:
     """Put the file back the way it was before that row's change. Returns the
-    new row. Raises JournalEntryNotFound or CannotUndo."""
+    new row. Refuses if later edits changed the file. Raises
+    JournalEntryNotFound or CannotUndo."""
     row = next((r for r in read(agent_id, MAX_ROWS) if r.get("id") == entry_id), None)
     if row is None:
         raise JournalEntryNotFound(entry_id)
@@ -201,14 +202,23 @@ def undo(agent_id: int, entry_id: str) -> dict | None:
             raise CannotUndo("This row does not name a note.")
         memory_topics.check_name(path.split("/", 1)[1])
     before_now = _current(agent_id, path)
+    current_hash = None if before_now is None else text_hash(before_now)
+    if "after_hash" not in row or current_hash != row["after_hash"]:
+        raise CannotUndo("The notes changed after this entry. Undo newer changes first or review the current notes.")
+    # Pass the observed hash through to the write/delete as well, so an edit
+    # between this check and the mutation cannot be overwritten silently.
+    expected_hash = text_hash(before_now or "")
     target = row.get("before")
-    if path == agent_memory.MEMORY_FILE:
-        doc, _ = agent_memory.write_memory(agent_id, target or "")
-        after = doc.text
-    elif target is None:
-        memory_topics.delete_topic(agent_id, path.split("/", 1)[1])
-        after = None
-    else:
-        doc, _, _ = memory_topics.write_topic(agent_id, path.split("/", 1)[1], target)
-        after = doc.text
+    try:
+        if path == agent_memory.MEMORY_FILE:
+            doc, _ = agent_memory.write_memory(agent_id, target or "", expected_hash=expected_hash)
+            after = doc.text
+        elif target is None:
+            memory_topics.delete_topic(agent_id, path.split("/", 1)[1], expected_hash=expected_hash)
+            after = None
+        else:
+            doc, _, _ = memory_topics.write_topic(agent_id, path.split("/", 1)[1], target, expected_hash=expected_hash)
+            after = doc.text
+    except agent_memory.MemoryConflict:
+        raise CannotUndo("The notes changed while Undo was being applied. Review the current notes and try again.") from None
     return record(agent_id, path, actor="undo", before=before_now, after=after)

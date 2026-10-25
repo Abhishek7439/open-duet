@@ -232,7 +232,7 @@ async def test_an_agents_own_file_edits_to_its_notes_are_journaled_and_undoable(
         (agent_memory.agent_home(agent.id) / "memory" / "new.md").write_text("- a new topic by the agent\n")
 
     engine.edit = edit
-    await say(rt, sessions, agent, "Remember that I like coffee")
+    await say(rt, sessions, agent, "I like coffee; add it with your file tools.")
     rows = memory_journal.read(agent.id)
     assert {(r["path"], r["actor"], r["kind"]) for r in rows} == {("MEMORY.md", "agent", "edited"), ("memory/new.md", "agent", "created")}
     memory_journal.undo(agent.id, next(r["id"] for r in rows if r["path"] == "memory/new.md"))

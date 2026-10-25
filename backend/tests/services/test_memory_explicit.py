@@ -178,3 +178,19 @@ def test_oversized_prior_snapshot_receipt_reports_undo_unavailable(storage, monk
     assert row['can_undo'] is False
     assert 'Undo is unavailable' in result and row['reason'] in result
     assert 'supports Undo' not in result
+
+
+def test_stale_explicit_undo_preserves_newer_note_and_reverse_order_works(storage):
+    request('Remember that my favorite color is teal')
+    first = memory_journal.read(1)[0]
+    request('Remember that my home is Pune')
+    second = memory_journal.read(1)[0]
+    latest = agent_memory.read_memory(1).text
+    with pytest.raises(memory_journal.CannotUndo, match='changed after'):
+        memory_journal.undo(1, first['id'])
+    assert agent_memory.read_memory(1).text == latest
+    assert len(memory_journal.read(1)) == 2
+    memory_journal.undo(1, second['id'])
+    assert 'my home is Pune' not in agent_memory.read_memory(1).text
+    memory_journal.undo(1, first['id'])
+    assert not agent_memory.read_memory(1).text

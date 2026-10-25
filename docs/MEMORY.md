@@ -561,7 +561,10 @@ Every change made through the app to `MEMORY.md` or a topic note (an editor
 save, a topic deletion, an accepted proposal, an undo) is a row: which file,
 who (`person`, `proposal`, `upkeep`, `agent`, `import`, `undo`), created, edited or deleted, the before and
 after hashes, a short diff, and the earlier text, so **Undo** puts the file
-back without anything else. An undo is itself a row and can be undone. A row
+back only while it still matches that change's recorded result. A later edit
+causes `409 cannot_undo`; undo newer changes first or review the current notes.
+The final write/delete also checks the observed hash to reject concurrent edits.
+An undo is itself a row and can be undone. A row
 whose earlier text held something that looked like a secret keeps no earlier
 text and cannot be undone; neither can one whose earlier text was over 256 KB.
 The **History** tab shows the rows with their diffs.
