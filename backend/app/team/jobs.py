@@ -267,6 +267,14 @@ class Jobs:
         self.rt.hub.notify(job.requester_thread_id)
         self.kick()
 
+    def _stop_active_turn(self, turn_id):
+        if turn_id is None:
+            return
+        active = self.rt._runs.get(turn_id)
+        if active:
+            active.stop_requested = True
+            active.ctx.abort()
+
     async def cancel(self, job_id, *, outcome='stopped'):
         async with self.rt.session() as db:
             rows = list((await db.execute(select(AgentJob).where(AgentJob.owner_id == self.rt.owner_id, AgentJob.status.in_(LIVE)))).scalars())
@@ -276,10 +284,14 @@ class Jobs:
         for row in reversed(rows):
             if row.id in selected:
                 await self.settle(row.id, 'cancelled' if outcome == 'stopped' else 'failed', outcome)
-                active = self.rt._runs.get(row.assignee_turn_id)
-                if active:
-                    active.stop_requested = True
-                    active.ctx.abort()
+                # The scheduler can start a turn after this snapshot was read.
+                # Re-read the id after settling so cancellation sees a turn
+                # recorded concurrently by _start.
+                async with self.rt.session() as db:
+                    current_turn_id = await db.scalar(
+                        select(AgentJob.assignee_turn_id).where(AgentJob.id == row.id)
+                    )
+                self._stop_active_turn(current_turn_id or row.assignee_turn_id)
 
     async def cancel_for_turn(self, turn_id):
         async with self.rt.session() as db:
@@ -762,14 +774,26 @@ class Jobs:
                 await db.commit()
             turn = await self.rt.send_turn(thread_id, self.assignment_prompt(current), approval_mode=current.approval_mode, approval_timeout=approval_timeout,
                                            team_origin=current.origin_kind, internal=True)
+            stop_started_turn = False
             async with self.rt.session() as db:
                 await begin_write(db)
-                row = await db.get(AgentJob, job_id)
-                row.assignee_turn_id = turn.id
-                if row.reply != 'wait':
-                    row.current_turn_id = turn.id
-                event(db, row, 'started', {'thread_id': thread_id, 'turn_id': turn.id})
-                await db.commit()
+                row = await db.get(AgentJob, job_id, with_for_update=True)
+                if row is None:
+                    stop_started_turn = True
+                else:
+                    # send_turn starts the provider task before it returns. If
+                    # Stop settled this job during that gap, record the turn
+                    # for diagnostics and abort it instead of orphaning it.
+                    stop_started_turn = row.status in TERMINAL
+                    row.assignee_turn_id = turn.id
+                    if not stop_started_turn:
+                        if row.reply != 'wait':
+                            row.current_turn_id = turn.id
+                        event(db, row, 'started', {'thread_id': thread_id, 'turn_id': turn.id})
+                    await db.commit()
+            if stop_started_turn:
+                self._stop_active_turn(turn.id)
+                return
         except Exception as exc:  # noqa: BLE001
             from app.services.thread_store import ThreadBusy
             if requeue_if_busy and isinstance(exc, ThreadBusy):
