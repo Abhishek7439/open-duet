@@ -55,9 +55,18 @@ async def team(sessions, owner, monkeypatch, tmp_path):
         if not rt._runs:
             break
         await asyncio.sleep(.05)
-    await rt.team_jobs.close()
+    # A run removes itself before scheduling its notice hook. Those hooks
+    # still use database sessions, so empty _runs alone is not a teardown
+    # boundary. Finish them before cleanup deletes rows or disposes the engine.
+    await wait_until(lambda: not rt._runs and not rt.notices.tasks)
+    # Prevent new passes and drain the existing pass rather than cancelling
+    # it in the middle of a SQLite write transaction.
+    rt._closing = True
+    if rt.team_jobs._kick_task is not None:
+        await asyncio.gather(rt.team_jobs._kick_task, return_exceptions=True)
     await rt.shutdown()
     await asyncio.gather(*rt.rooms.tasks.values(), return_exceptions=True)
+    await wait_until(lambda: not rt._runs and not rt.notices.tasks)
 
 
 def lead_script(rt, engine, thread, first):
