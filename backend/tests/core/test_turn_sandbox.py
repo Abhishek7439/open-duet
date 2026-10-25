@@ -150,3 +150,40 @@ def test_claude_reports_sandbox_refusal_without_generic_runner_error():
     outcome = ClaudeAdapter()._outcome(SimpleNamespace(aborted=False), attempt, tools=False)
     assert outcome.error_code == 'sandbox_unavailable'
     assert outcome.error == 'Sandbox required but unavailable'
+
+
+@pytest.mark.parametrize('target', [
+    '/run/systemd/resolve/stub-resolv.conf',
+    '/run/systemd/resolve/resolv.conf',
+])
+def test_builtin_resolver_symlink_mounts_only_trusted_file(monkeypatch, fake_linux, target):
+    # Simulate Ubuntu's resolver layout on every platform, including macOS.
+    resolve, exists, is_file = Path.resolve, Path.exists, Path.is_file
+    monkeypatch.setattr(Path, 'resolve', lambda self, *a, **kw: Path(target) if str(self) == '/etc/resolv.conf' else resolve(self, *a, **kw))
+    monkeypatch.setattr(Path, 'exists', lambda self: True if str(self) == '/etc/resolv.conf' else exists(self))
+    monkeypatch.setattr(Path, 'is_file', lambda self: True if str(self) == target else is_file(self))
+    args = box._base()
+    mounts = [args[index + 1:index + 3] for index, arg in enumerate(args) if arg in ('--ro-bind', '--bind')]
+    assert [target, '/etc/resolv.conf'] in mounts
+    assert all(source != '/run' and destination != '/run' for source, destination in mounts)
+    assert [mount for mount in mounts if mount[0].startswith('/run/')] == [[target, '/etc/resolv.conf']]
+    # The exception is unavailable to operator-supplied runtime/login grants.
+    with pytest.raises(box.SandboxUnavailable):
+        box._check_grant(Path(target))
+
+
+@pytest.mark.parametrize('target,regular_file', [
+    ('/run/docker.sock', False),
+    ('/run/private/data', True),
+    ('/run/systemd/resolve', False),
+    ('/run/systemd/resolve/stub-resolv.conf', False),
+])
+def test_resolver_symlink_rejects_unrelated_run_paths_or_nonfiles(monkeypatch, fake_linux, target, regular_file):
+    resolve, exists, is_file = Path.resolve, Path.exists, Path.is_file
+    monkeypatch.setattr(Path, 'resolve', lambda self, *a, **kw: Path(target) if str(self) == '/etc/resolv.conf' else resolve(self, *a, **kw))
+    monkeypatch.setattr(Path, 'exists', lambda self: True if str(self) == '/etc/resolv.conf' else exists(self))
+    monkeypatch.setattr(Path, 'is_file', lambda self: regular_file if str(self) == target else is_file(self))
+    with pytest.raises(box.SandboxUnavailable):
+        box._base()
+    with pytest.raises(box.SandboxUnavailable):
+        box._check_grant(Path(target))

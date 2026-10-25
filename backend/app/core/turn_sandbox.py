@@ -28,7 +28,15 @@ def _contains(parent: Path, child: Path) -> bool:
     return parent == child or parent in child.parents
 
 
-def _check_grant(path: Path) -> None:
+# Only the built-in /etc/resolv.conf mount may read these exact regular files.
+# Ubuntu uses the stub file; other systemd-resolved setups use resolv.conf.
+_RESOLVER_FILES = frozenset({
+    Path("/run/systemd/resolve/stub-resolv.conf"),
+    Path("/run/systemd/resolve/resolv.conf"),
+})
+
+
+def _check_grant(path: Path, *, resolver_file: bool = False) -> None:
     # An operator may expose runtime/login folders, never the database or its
     # enclosing data directory. Also reject a whole home or filesystem root.
     from app.core import app_settings
@@ -38,7 +46,8 @@ def _check_grant(path: Path) -> None:
     for value in (settings.ENGINE_PROCESS_DIR, settings.DECISION_LOG_DIR, settings.ATTACHMENTS_DIR):
         if value.strip():
             protected.append(Path(value).expanduser().resolve())
-    unsafe_tree = any(_contains(Path(root), path) for root in ('/proc', '/sys', '/dev', '/run'))
+    trusted_resolver = resolver_file and path in _RESOLVER_FILES and path.is_file()
+    unsafe_tree = any(_contains(Path(root), path) for root in ('/proc', '/sys', '/dev', '/run')) and not trusted_resolver
     if path in (Path('/'), Path('/tmp')) or unsafe_tree or any(_contains(path, item) for item in protected):
         raise SandboxUnavailable('A sandbox mount would expose the home or application data. Use a narrower folder.')
 
@@ -79,8 +88,11 @@ def _base() -> list[str]:
     for name in ('/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/ssl',
                  '/etc/ld.so.cache', '/etc/localtime'):
         if Path(name).exists():
-            _check_grant(Path(name).resolve())
-            result.extend(['--ro-bind', name, name])
+            source = Path(name).resolve()
+            _check_grant(source, resolver_file=name == '/etc/resolv.conf')
+            # Bind the resolved file at /etc/resolv.conf, without exposing the
+            # host /run tree or recreating a dangling systemd-resolved symlink.
+            result.extend(['--ro-bind', str(source), name])
     return result
 
 
