@@ -31,7 +31,7 @@ import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-
 import { t } from "@/lib/i18n";
 import { reportPresence } from "@/lib/presence";
 import { chatHref, parsePanel, type Panel } from "@/lib/panel";
-import { parseSkillCommand, skillErrorText, toggleSkill, type SkillSummary } from "@/lib/skills";
+import { parseSkillCommand, skillErrorText, toggleSkill, learnableTurn, type SkillSummary, type SkillLearnSource } from "@/lib/skills";
 import { RoomList } from "./RoomList";
 import { RoomView } from "./RoomView";
 import { collaboration, type TeamState } from "@/lib/collaboration";
@@ -175,7 +175,7 @@ export function ChatApp() {
   // Skills picked for the next message only, and the text a Save as skill opened the editor with.
   // Both are tied to the agent they were made for, so another agent starts clean.
   const [picked, setPicked] = useState<{ agentId: number | null; names: string[] }>({ agentId: null, names: [] });
-  const [skillSeed, setSkillSeed] = useState<{ text: string; nonce: number } | null>(null);
+  const [skillSeed, setSkillSeed] = useState<{ source: SkillLearnSource; nonce: number } | null>(null);
   const [loadedSkills, setLoadedSkills] = useState<{ agentId: number; list: SkillSummary[] } | null>(null);
   // What "Always allow this command" did, by approval id, and rules undone here.
   const [remembered, setRemembered] = useState<Record<string, Remembered>>({});
@@ -391,9 +391,8 @@ export function ChatApp() {
   const chosenSkills = picked.agentId === skillAgentId ? picked.names.filter((n) => agentSkills.some((s) => s.name === n && s.enabled)) : [];
   const setChosenSkills = (update: (names: string[]) => string[]) =>
     setPicked({ agentId: skillAgentId, names: update(chosenSkills) });
-  // The last thing the person asked in this conversation: the seed for Save as skill.
-  const lastRequest = [...transcript.items].reverse().find((item) => item.kind === "user");
-  const canSaveSkill = threadAgent !== null && lastRequest?.kind === "user" && transcript.runningTurnId === null;
+  const skillTurnId = learnableTurn(transcript.items);
+  const canSaveSkill = threadAgent !== null && threadId !== null && skillTurnId !== null && transcript.runningTurnId === null;
   const waiting = pendingApprovals(transcript).length > 0;
   const totals = conversationUsage(
     transcript.items.flatMap((item) => (item.kind === "turn_end" ? [{ usage: item.usage }] : []))
@@ -847,7 +846,7 @@ export function ChatApp() {
             skills={skillAgentId !== null ? agentSkills : undefined}
             chosenSkills={chosenSkills}
             onToggleSkill={skillAgentId !== null ? (name) => setChosenSkills((names) => toggleSkill(names, name)) : undefined}
-            onSaveAsSkill={canSaveSkill ? () => { setSkillSeed({ text: lastRequest.text, nonce: Date.now() }); setPanel("skills"); } : undefined}
+            onSaveAsSkill={canSaveSkill ? () => { setSkillSeed({ source: { thread_id: threadId!, turn_id: skillTurnId! }, nonce: Date.now() }); setPanel("skills"); } : undefined}
           />
         </main>
       </div>
@@ -859,7 +858,7 @@ export function ChatApp() {
       {panel === "skills" && threadAgent && (
         <Inspector title={`Skills · ${threadAgent.name}`} inline={inspectorInline} onClose={() => { setSkillSeed(null); setPanel(null); }}>
           <div className="p-4">
-            <SkillsPanel key={`${threadAgent.id}-${skillSeed?.nonce ?? 0}`} agent={threadAgent} seed={skillSeed?.text ?? null} onChanged={() => setSkillsTick((n) => n + 1)} />
+            <SkillsPanel key={`${threadAgent.id}-${skillSeed?.nonce ?? 0}`} agent={threadAgent} learnFrom={skillSeed?.source ?? null} onChanged={() => setSkillsTick((n) => n + 1)} />
           </div>
         </Inspector>
       )}

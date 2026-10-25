@@ -14,6 +14,7 @@ import {
   SKILL_NAME_MAX,
   type SkillSource,
   type SkillSummary,
+  type SkillLearnSource,
 } from "@/lib/skills";
 
 const FIELD =
@@ -35,27 +36,26 @@ type Draft = {
   source: SkillSource;
   warnings: string[];
   redacted: number;
+  learnedFrom?: SkillLearnSource;
 };
 
 type Import = { text: string; error: string | null };
 
 export function SkillsPanel({
   agent,
-  seed = null,
+  learnFrom = null,
   onChanged,
 }: {
   agent: Agent;
-  // Start with a new skill drafted from this text (Save as skill). It opens the editor only:
-  // nothing is saved until the person presses Save. Read once, when the panel mounts; mount
-  // it with a new `key` to start another. Mount with a `key` per agent too.
-  seed?: string | null;
+  // The server prepares a draft from this completed turn. Nothing is saved on open.
+  learnFrom?: SkillLearnSource | null;
   onChanged?: () => void;
 }) {
   const agentId = agent.id;
   const [skills, setSkills] = useState<SkillSummary[] | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(() =>
-    seed === null ? null : { existing: null, ...skillSkeleton(seed), enabled: false, source: "learned", warnings: [], redacted: 0 },
-  );
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [reviewed, setReviewed] = useState(false);
+  const [receipt, setReceipt] = useState<{ name: string; revision: string } | null>(null);
   const [importing, setImporting] = useState<Import | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,6 +75,37 @@ export function SkillsPanel({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  const sourceThreadId = learnFrom?.thread_id;
+  const sourceTurnId = learnFrom?.turn_id;
+  useEffect(() => {
+    if (sourceThreadId === undefined || sourceTurnId === undefined) return;
+    let live = true;
+    api.learnSkill(agentId, { thread_id: sourceThreadId, turn_id: sourceTurnId }).then(
+      (preview) => {
+        if (live) setDraft({ existing: null, ...preview, enabled: false, source: "learned", learnedFrom: { thread_id: preview.thread_id, turn_id: preview.turn_id } });
+      },
+      (err) => { if (live) setError(skillErrorText(err)); },
+    );
+    return () => { live = false; };
+  }, [agentId, sourceThreadId, sourceTurnId]);
+
+  const undo = async () => {
+    if (!receipt) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.undoLearnedSkill(agentId, receipt.name, receipt.revision);
+      setDraft((current) => current?.existing === receipt.name ? null : current);
+      setReceipt(null);
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(skillErrorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const startNew = () => {
     setImporting(null);
@@ -115,12 +146,13 @@ export function SkillsPanel({
     setBusy(true);
     setError(null);
     try {
-      const doc = await api.saveSkill(agentId, name, {
-        description: draft.description.trim(),
-        body: draft.body,
-        enabled: draft.enabled,
-        source: draft.source,
-      });
+      const learned = draft.existing === null ? draft.learnedFrom : undefined;
+      const doc = learned
+        ? await api.saveLearnedSkill(agentId, name, { ...learned, description: draft.description.trim(), body: draft.body, reviewed })
+        : await api.saveSkill(agentId, name, {
+          description: draft.description.trim(), body: draft.body, enabled: draft.enabled, source: draft.source,
+        });
+      if (learned) setReceipt({ name, revision: doc.revision });
       // What was saved can differ (secrets are removed); show it so the person sees the result.
       setDraft({ existing: name, ...doc });
       await load();
@@ -166,7 +198,7 @@ export function SkillsPanel({
 
   const nameValid = draft ? (draft.existing !== null || isSkillName(draft.name)) : false;
   const taken = draft !== null && draft.existing === null && (skills ?? []).some((s) => s.name === draft.name);
-  const canSave = draft !== null && !busy && nameValid && !taken && draft.body.trim() !== "" && draft.description.trim() !== "";
+  const canSave = draft !== null && !busy && nameValid && !taken && draft.body.trim() !== "" && draft.description.trim() !== "" && (!draft.learnedFrom || reviewed);
 
   return (
     <section aria-label="Skills" className="space-y-3 border-t border-line pt-4">
@@ -183,6 +215,12 @@ export function SkillsPanel({
         Saved instructions for {agent.name}. A skill is used only when you pick it for a message; it never starts on its own,
         and importing one does not switch it on.
       </p>
+      {receipt && (
+        <div role="status" className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span>Saved /{receipt.name} switched off. Test it on a second input before routine use.</span>
+          <button className={SMALL} disabled={busy} onClick={undo}>Undo save</button>
+        </div>
+      )}
       {error && <p role="alert" className="text-xs text-danger">{error}</p>}
 
       {importing && (
@@ -245,8 +283,17 @@ export function SkillsPanel({
             value={draft.body}
             onChange={(e) => setDraft({ ...draft, body: e.target.value })}
           />
+          {draft.learnedFrom && (
+            <>
+              <p className="text-xs text-muted">Source: conversation {draft.learnedFrom.thread_id}, turn {draft.learnedFrom.turn_id}. Only the request and result were copied; review the reference and replace the workflow sections.</p>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+                <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} />
+                I reviewed the reusable steps, inputs, validation and approval boundary.
+              </label>
+            </>
+          )}
           <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
-            <input type="checkbox" checked={draft.enabled} onChange={() => setDraft({ ...draft, enabled: !draft.enabled })} />
+            <input type="checkbox" disabled={!!draft.learnedFrom} checked={draft.enabled} onChange={() => setDraft({ ...draft, enabled: !draft.enabled })} />
             Available to pick in conversations
           </label>
           <div className="flex flex-wrap gap-2">

@@ -2,7 +2,7 @@
 // on purpose. Nothing here runs by itself and a skill never triggers on its own.
 
 export const MAX_SKILLS_PER_MESSAGE = 3;
-export const SKILL_NAME_MAX = 64;
+export const SKILL_NAME_MAX = 48;
 
 export type SkillSource = "user" | "imported" | "learned" | (string & {});
 
@@ -21,11 +21,15 @@ export type SkillDoc = {
   body: string;
   enabled: boolean;
   source: SkillSource;
+  revision: string;
   redacted: number;
   warnings: string[];
 };
 
 export type SkillSave = { description: string; body: string; enabled: boolean; source: SkillSource };
+
+export type SkillLearnSource = { thread_id: number; turn_id: number };
+export type SkillLearnPreview = SkillPreview & SkillLearnSource & { redacted: number };
 
 export type SkillPreview = { name: string; description: string; body: string; warnings: string[] };
 
@@ -96,7 +100,7 @@ export function toggleSkill(chosen: readonly string[], name: string): string[] {
 }
 
 export function sourceLabel(source: SkillSource): string {
-  return source === "imported" ? "Imported" : source === "learned" ? "Learned from a run" : "Written here";
+  return source === "imported" ? "Imported" : (source === "learned" || source.startsWith("learned:")) ? "Learned from a run" : "Written here";
 }
 
 // The skills the backend recorded as used on a turn (`skill.used` event data).
@@ -109,4 +113,13 @@ export function skillErrorText(err: unknown): string {
   const code = (err as { code?: string | null } | null)?.code;
   if (code === "skill_unavailable") return "A skill you picked is no longer available. Remove it and try again.";
   return err instanceof Error && err.message ? err.message : "Could not reach the backend.";
+}
+
+// Only a completed latest person turn is offered. The server rechecks ownership,
+// agent, origin and durable status before either preview or save.
+export function learnableTurn(items: readonly { kind: string; turnId?: number | null; status?: string }[]): number | null {
+  const user = [...items].reverse().find((item) => item.kind === "user");
+  if (!user?.turnId) return null;
+  const end = items.find((item) => item.kind === "turn_end" && item.turnId === user.turnId);
+  return end?.status === "completed" ? user.turnId : null;
 }

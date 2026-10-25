@@ -1,4 +1,4 @@
-import type { SkillDoc, SkillPreview, SkillSave, SkillSummary } from "./skills";
+import type { SkillDoc, SkillPreview, SkillSave, SkillSummary, SkillLearnPreview, SkillLearnSource } from "./skills";
 import type { TemplateCatalog, TemplateSkill } from "./templates";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -1123,6 +1123,12 @@ export const api = {
     request<SkillDoc>(`/agents/${agentId}/skills/${encodeURIComponent(name)}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteSkill: (agentId: number, name: string) =>
     request<void>(`/agents/${agentId}/skills/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  learnSkill: (agentId: number, source: SkillLearnSource) =>
+    request<SkillLearnPreview>(`/agents/${agentId}/skills/learn`, { method: "POST", body: JSON.stringify(source) }),
+  saveLearnedSkill: (agentId: number, name: string, body: SkillLearnSource & { description: string; body: string; reviewed: boolean }) =>
+    request<SkillDoc>(`/agents/${agentId}/skills/learn/${encodeURIComponent(name)}`, { method: "POST", body: JSON.stringify(body) }),
+  undoLearnedSkill: (agentId: number, name: string, revision: string) =>
+    request<void>(`/agents/${agentId}/skills/${encodeURIComponent(name)}/undo`, { method: "POST", body: JSON.stringify({ revision }) }),
   previewSkill: (agentId: number, markdown: string) =>
     request<SkillPreview>(`/agents/${agentId}/skills/import`, { method: "POST", body: JSON.stringify({ markdown }) }),
 

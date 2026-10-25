@@ -4,6 +4,13 @@
 
 ### Added
 
+- Save as skill now prepares a bounded, redacted draft from a successful chat
+  turn's request and result, with source provenance and editable workflow sections.
+  Explicit reviewed saves create a new disabled skill; revision-bound Undo refuses
+  later edits. Existing skill selection invokes it only when explicitly chosen.
+  SQLite/scripted-engine and cross-worker file-lock tests cover the workflow;
+  real-provider, Windows and packaged UI qualification remain open.
+
 - Routine changes made through chat have dedicated result cards and owner-only
   Undo. Undo refuses stale settings or executions and restores definitions paused,
   without replaying runs or restoring webhook grants/history.

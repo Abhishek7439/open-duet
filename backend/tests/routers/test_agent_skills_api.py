@@ -221,3 +221,78 @@ async def test_deleting_an_agent_removes_its_skills(api, tmp_path):
     assert folder.exists()
     assert (await api.delete(f"/api/v1/agents/{agent['id']}")).status_code == 204
     assert not folder.exists()
+
+
+async def learn_source(api, sessions, agent, prompt="Review expenses in first.csv"):
+    thread = (await thread_from(api, agent)).json()
+    turn = (await api.post(f"/api/v1/threads/{thread['id']}/turns", json={"prompt_text": prompt})).json()
+    await finished(sessions, thread["id"])
+    return {"thread_id": thread["id"], "turn_id": turn["id"]}
+
+
+async def test_reviewed_learn_save_second_fixture_and_revision_bound_undo(api, sessions, cli, seen):
+    agent = await make(api, memory_enabled=False)
+    cli.script({"type": "chat", "text": "First result: list the source row and policy rule."})
+    source = await learn_source(api, sessions, agent)
+    response = await api.post(url(agent, "learn"), json=source)
+    assert response.status_code == 200, response.text
+    draft = response.json()
+    assert "First result:" in draft["body"] and "first.csv" in draft["body"]
+    assert draft["thread_id"] == source["thread_id"] and draft["turn_id"] == source["turn_id"]
+    assert (await api.get(url(agent))).json() == []  # preview is read-only
+    body = {**source, "description": "Review expenses", "body": "Compare each supplied CSV row to the supplied policy; list row and rule.", "reviewed": False}
+    assert code_of(await api.post(url(agent, "learn/expense-review"), json=body)) == "skill_review_required"
+    body["reviewed"] = True
+    saved = await api.post(url(agent, "learn/expense-review"), json=body)
+    assert saved.status_code == 201, saved.text
+    doc = saved.json()
+    assert doc["enabled"] is False and doc["source"] == f"learned:{source['thread_id']}:{source['turn_id']}"
+    assert code_of(await api.post(url(agent, "learn/expense-review"), json=body)) == "skill_exists"
+    # Turning on is a separate explicit edit; invocation carries the reviewed
+    # instructions to a second fixture, without claiming real-model quality.
+    await put(api, agent, "expense-review", **{key: doc[key] for key in ("description", "body", "source")}, enabled=True)
+    cli.script({"type": "chat", "text": "Second fixture result"})
+    second = (await thread_from(api, agent)).json()
+    result = await api.post(f"/api/v1/threads/{second['id']}/turns", json={"prompt_text": "Review second.csv using policy.md", "skills": ["expense-review"]})
+    assert result.status_code == 202
+    await finished(sessions, second["id"])
+    assert body["body"] in seen[-1].prompt and "second.csv" in seen[-1].prompt
+    stale = await api.post(url(agent, "expense-review/undo"), json={"revision": doc["revision"]})
+    assert code_of(stale) == "skill_undo_stale"
+    assert (await api.get(url(agent, "expense-review"))).json()["enabled"] is True
+    # A second saved draft can be undone while it is still exactly the saved creation.
+    fresh = (await api.post(url(agent, "learn/expense-review-draft"), json=body)).json()
+    assert (await api.post(url(agent, "expense-review-draft/undo"), json={"revision": fresh["revision"]})).status_code == 204
+    assert (await api.get(url(agent, "expense-review-draft"))).status_code == 404
+
+
+async def test_learn_refuses_other_agent_owner_and_unsuccessful_origins(api, sessions, rt):
+    from sqlalchemy import update
+    from app.db.models import Thread, Turn
+
+    agent = await make(api)
+    other = await make(api)
+    source = await learn_source(api, sessions, agent)
+    assert code_of(await api.post(url(other, "learn"), json=source)) == "skill_source_not_found"
+    async with sessions() as db:
+        await db.execute(update(Thread).where(Thread.id == source["thread_id"]).values(owner_id="another-owner"))
+        await db.commit()
+    assert code_of(await api.post(url(agent, "learn"), json=source)) == "skill_source_not_found"
+    async with sessions() as db:
+        await db.execute(update(Thread).where(Thread.id == source["thread_id"]).values(owner_id=rt.owner_id))
+        await db.commit()
+    for values in ({"status": "failed"}, {"status": "cancelled"}, {"status": "interrupted"}, {"status": "running"}, {"status": "succeeded", "origin": "routine"}, {"origin": "outside"}, {"origin": "peer"}, {"origin": None}):
+        async with sessions() as db:
+            await db.execute(update(Turn).where(Turn.id == source["turn_id"]).values(**values))
+            await db.commit()
+        assert code_of(await api.post(url(agent, "learn"), json=source)) == "skill_source_unavailable"
+    async with sessions() as db:
+        await db.execute(update(Turn).where(Turn.id == source["turn_id"]).values(status="succeeded", origin="person"))
+        await db.commit()
+
+
+ROUTES.extend([
+    ("POST", "/api/v1/agents/1/skills/learn", {"thread_id": 1, "turn_id": 1}),
+    ("POST", "/api/v1/agents/1/skills/learn/x", {"thread_id": 1, "turn_id": 1, "description": "d", "body": "b", "reviewed": True}),
+    ("POST", "/api/v1/agents/1/skills/x/undo", {"revision": "a" * 64}),
+])
