@@ -213,3 +213,72 @@ async def test_removed_member_loses_room_recall_and_memory_capture(harness, sess
         assert not result.conversations
         kept = await session_search.search(db, owner_id=rt.owner_id, agent_id=lead.id, current_thread_id=None, query='rostersecret', scope='conversations')
         assert kept.conversations
+
+
+@pytest.mark.parametrize('preceding_state', ['stop_requested', 'skipped'])
+async def test_finish_waits_for_room_before_locking_dispatch(harness, sessions, monkeypatch, preceding_state):
+    """A real PG waiter must not stop the room holder updating its dispatch.
+
+    The old dispatch->room order deadlocked against Stop's room->dispatch
+    order. A server-observed wait barrier makes that interleaving deterministic.
+    """
+    from uuid import uuid4
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.core.config import settings
+    from app.db.models import Room
+    if settings.DATABASE_KIND != 'postgres':
+        pytest.skip('asserts PostgreSQL row-lock order with independent sessions')
+    rt, engine, lead, worker = harness
+    room = await rt.rooms.create({'name': 'Lock order', 'member_ids': [lead.id], 'default_responder_kind': 'member'})
+    await rt.rooms.post(room['id'], 'Finish after concurrent room change')
+    async with sessions() as db:
+        dispatch = await db.scalar(select(RoomDispatch).where(RoomDispatch.room_id == room['id']))
+        dispatch.status = 'running'
+        await db.commit()
+        dispatch_id = dispatch.id
+    application = 'room_finish_' + uuid4().hex
+    finish_engine = create_async_engine(settings.ASYNC_DATABASE_URL, connect_args={
+        'server_settings': {'application_name': application},
+    })
+    finish_sessions = async_sessionmaker(finish_engine, expire_on_commit=False)
+    task = None
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(rt, '_session_factory', finish_sessions)
+            async with sessions() as holder:
+                await holder.get(Room, room['id'], with_for_update=True)
+                task = asyncio.create_task(rt.rooms.finish(dispatch_id, None))
+                try:
+                    async with asyncio.timeout(5):
+                        while True:
+                            async with sessions() as monitor:
+                                waiting = await monitor.scalar(text(
+                                    "SELECT count(*) FROM pg_stat_activity WHERE application_name = :app "
+                                    "AND wait_event_type = 'Lock' AND query LIKE '%FOR UPDATE%'"
+                                ), {'app': application})
+                            if waiting == 1:
+                                break
+                            assert not task.done()
+                            await asyncio.sleep(.01)
+                    # If finish held the dispatch while waiting on our room,
+                    # this write would time out (or PostgreSQL would deadlock).
+                    await holder.execute(text("SET LOCAL lock_timeout = '1s'"))
+                    current = await holder.get(RoomDispatch, dispatch_id, with_for_update=True)
+                    if preceding_state == 'stop_requested':
+                        current.reason = preceding_state
+                    else:
+                        current.status = preceding_state
+                    await holder.commit()
+                finally:
+                    await holder.rollback()
+            await asyncio.wait_for(task, 5)
+        async with sessions() as db:
+            current = await db.get(RoomDispatch, dispatch_id)
+            assert current.status == ('stopped' if preceding_state == 'stop_requested' else 'skipped')
+    finally:
+        if task and not task.done():
+            task.cancel()
+        if task:
+            await asyncio.gather(task, return_exceptions=True)
+        await finish_engine.dispose()

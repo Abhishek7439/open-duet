@@ -379,10 +379,18 @@ class Rooms:
         noted = None
         async with self.rt.session() as db:
             await begin_write(db)
-            row = await db.get(RoomDispatch, dispatch_id, with_for_update=True)
-            if row is None or row.status != 'running':
+            room_id = await db.scalar(select(RoomDispatch.room_id).where(RoomDispatch.id == dispatch_id))
+            if room_id is None:
                 return
-            room = await db.get(Room, row.room_id, with_for_update=True)
+            # Claim, Stop and roster edits all lock room before dispatch. Do
+            # not hold the dispatch while waiting for that room: a Stop may
+            # already own the room and need to update this very dispatch.
+            room = await db.get(Room, room_id, with_for_update=True, populate_existing=True)
+            row = await db.get(RoomDispatch, dispatch_id, with_for_update=True, populate_existing=True)
+            # The unlocked lookup above only located the parent. Revalidate
+            # after waiting: a preceding writer may have settled/deleted work.
+            if row is None or row.room_id != room_id or row.status != 'running':
+                return
             if room is None or room.deleting_at:
                 row.status, row.finished_at = 'stopped', teams.now()
                 await db.commit()

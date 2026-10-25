@@ -33,6 +33,9 @@
 - Routine writers and manual run admission reload the locked definition, so
   concurrent Run now requests admit one run and a request following Undo uses
   the restored settings instead of a stale prompt.
+- Room reply completion locks the room before its dispatch, matching Stop and
+  roster edits, and rechecks the dispatch after waiting. This avoids a
+  PostgreSQL deadlock when a reply finishes during a concurrent room change.
 - Delegation shutdown gives an active scheduler transaction time to finish and
   stops additional passes before cancelling it, reducing SQLite lock races.
 - Repeated Undo reports its saved state without accessing expired database

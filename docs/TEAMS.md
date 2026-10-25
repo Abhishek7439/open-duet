@@ -36,8 +36,11 @@ The HTTP roster edit is `PATCH /rooms/{id}` with `member_ids` and the unchanged
 `expected_member_ids` from the roster the person reviewed. The room-row lock
 serializes edits with message routing and dispatch claims. Responses use
 `roster_conflict`, `member_busy` or `invalid_responder` to explain refused edits.
-This source increment has automated SQLite coverage; real-provider and packaged
-app qualification remain separate gates.
+Automated checks on 2026-10-26 cover SQLite and a disposable local PostgreSQL
+instance. PostgreSQL lock-barrier tests use independent sessions to verify that
+reply completion waits for the room before locking its dispatch, avoids deadlock
+with Stop, and rechecks work settled by a preceding writer. Real-provider and
+packaged app qualification remain separate gates.
 
 For a message without a tag, choose **Only tagged members**, **One member**, or
 **Everyone**. Tag an individual with `@name` or use `@everyone` to direct a
