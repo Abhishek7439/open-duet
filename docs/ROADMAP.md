@@ -5,14 +5,11 @@ a date. See [FEATURES.md](FEATURES.md) for the shipped surface and its guides.
 
 ## Snapshot
 
-Reviewed 2026-10-24 against source `7eb56e8`; the latest desktop tag is
-`v0.3.0` at `c1148bc`. The tag includes the assisted update checker. Source is
-two commits beyond the tag, so changes after `v0.3.0` should be treated as
-source-only until a later installer is built and checked. The two commits add
-a browser-disabled computer message and a Windows release fallback workflow.
-The `v0.3.0` prerelease currently has a Windows x64 installer; its macOS build
-failed, and the newest macOS arm64 DMG is `v0.2.0`. The Windows fallback
-workflow successfully published the `v0.3.0` installer.
+Reviewed 2026-10-25 against source `0ffb841`; the latest local desktop tag is
+`v0.4.0`, four source commits behind that baseline. Changes after the tag are
+source-only until a later installer is built and checked. The
+[capability matrix](CAPABILITIES.md) records current engine support and the
+remaining live-provider and artifact qualification gates.
 
 Current source already has named agents, an offline role gallery, explicitly
 invoked agent skills, memory and recall, search and attachments, routines,
@@ -24,13 +21,16 @@ updates. The product gaps below build on those features.
 
 ### P0 — Close the source-to-installer verification gap
 
-Publish a per-engine and per-platform capability matrix and check the tagged
-installer against it. Include CLI/login prerequisites, model and attachment
-support, approval behavior, team and computer support, and whether each item is
-source-tested, manually checked, or present in a release. Verify setup,
-updates, teams/rooms and computer flows on the actual packaged builds. Restore a
-current macOS arm64 release after fixing the failed v0.3.0 build. Keep the
-unsigned/experimental label until the release path is dependable.
+Check the tagged installer against the published [capability matrix](CAPABILITIES.md).
+Verify setup, updates, teams/rooms and computer flows on the actual packaged
+builds for each target platform. Keep the unsigned/experimental label until
+the release path is dependable.
+
+### P0 — Qualify Linux server isolation
+
+Require filesystem/process isolation and enforceable network isolation, with
+real-host checks, before expanding unattended server integrations. Environment
+filtering alone does not isolate a turn from the server's files or network.
 
 ### P1 — Make memory writes truthful and durable on every supported engine
 
@@ -42,13 +42,13 @@ is unavailable. Show note provenance in a fresh conversation, support
 correction and undo, and never move personal facts into team memory without
 explicit choice. See [memory](MEMORY.md).
 
-### P1 — Add guided agent setup by chatting
+### P1 — Qualify guided agent setup by chatting
 
-The existing lead can propose and apply team configuration, but there is no
-discoverable user-facing “create an agent by chatting” flow. Add requirements
-gathering, exact engine/model discovery, a reviewable setup result, and safe
-undo. Reuse the current setup service and preserve approval settings and
-request receipts.
+The discoverable create-by-chat entry, clarification, exact engine/model
+discovery, applied details and safe Undo are implemented for Claude and Codex.
+Codex has a recorded live create/correct/Undo run. Qualify Claude, PostgreSQL
+and packaged artifacts; separately verify long Codex delegation and resume.
+See [chat management](CHAT_MANAGEMENT.md).
 
 ### P1 — Connect calendar, email and a useful daily view
 
@@ -62,11 +62,10 @@ report an unavailable provider as an empty inbox or calendar.
 
 ### P1 — Let people manage routines from chat
 
-Routines already have a UI, schedule preview, run history, webhooks, approvals
-and retry controls. Add bounded agent tools to inspect, propose, pause, resume,
-run and delete them. A new routine must stay disabled until its target, prompt,
-time zone, next run and approval floor are reviewed. Add webhook delivery
-receipts and, later, connected-app event triggers with explicit grants,
+Routines already have a UI, schedule preview, run history, webhooks, approvals,
+retry controls and chat management tools. Keep newly proposed routines disabled
+until review. Complete durable webhook delivery receipts, then applied-result
+cards and safe Undo. Connected-app event triggers need separate grants,
 provenance and bounded retries.
 
 ### P1 — Finish room management and routing
@@ -88,8 +87,8 @@ responses before expanding the catalog.
 
 ### P1 — Verify memory, teams and computers across engines
 
-Keep a live compatibility matrix for Claude, Codex, ACP and API engines. Team
-tools currently require Claude; structured browser tools are Claude-only;
+Keep the [compatibility matrix](CAPABILITIES.md) current for Claude, Codex, ACP
+and API engines. Team tools and Docker browser tools support Claude and Codex;
 computer access varies by engine. Test approvals, failures, hostile tool
 results and longer-running work for each supported path before broadening the
 claims.

@@ -4,7 +4,8 @@ Open Duet is a workspace for named AI agents, durable conversations, teams,
 and recurring work. This page describes the repository's current source;
 features added after a desktop release tag may not be in that installer. See
 the [README](../README.md) for install options and the [roadmap](ROADMAP.md)
-for remaining work.
+for remaining work and the [capability matrix](CAPABILITIES.md) for engine,
+platform and release qualification limits.
 
 ## Agent workspace
 
@@ -35,7 +36,8 @@ for remaining work.
 
 - **Engines.** The source includes Claude, Codex, generic ACP and
   OpenAI-compatible/OpenRouter paths, plus opt-in Gemini and Cursor ACP presets
-  and experimental OpenCode. Engine capabilities differ: for example,
+  and experimental OpenCode, plus managed Google Antigravity account setup.
+  Engine capabilities differ: for example,
   attachments, teams, memory tools and computers are not available on every
   engine. See [engine setup and capabilities](ENGINES.md).
 - **Approvals.** Ask, Accept edits and Plan modes, saved command rules, a safety
@@ -43,8 +45,9 @@ for remaining work.
   use the same approval boundary. See [setup and approvals](SETUP.md#approval-modes-saved-rules-and-the-decision-log).
 - **Agent computers.** An agent can run in its own Docker shell or Linux
   desktop with bounded tools, resource limits, a workspace mount, live viewing
-  and take-control. Structured Chromium tools are opt-in and currently Claude
-  only. The desktop app also has a separate opt-in native macOS preview. These
+  and take-control. Structured Chromium tools are opt-in for Claude and Codex
+  Docker agents; real Codex browser/provider qualification remains open.
+  The desktop app also has a separate opt-in native macOS preview. These
   features remain experimental; remote SSH computers and enforceable egress
   allowlists are not implemented. See [computers](COMPUTERS.md),
   [browser tools](BROWSER.md) and [native desktop](NATIVE-DESKTOP.md).

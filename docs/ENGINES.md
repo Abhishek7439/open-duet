@@ -97,7 +97,7 @@ Choose an engine and model in the Agents panel or before sending a new chat.
 The model field offers catalog suggestions and accepts a custom ID only when
 the engine supports it. The generic ACP engine uses its CLI's configured model;
 its picker exposes only the agent default. A computer attached to an agent
-requires a computer-capable engine (currently Claude).
+requires a computer-capable engine (Claude, or Codex for Docker computers).
 
 An existing conversation keeps its engine. Its header lets you change the
 model while idle. An explicit thread model overrides the agent; an unset one
@@ -109,7 +109,8 @@ the engine default. Changing an agent's engine affects new conversations.
 `backend/app/services/provider_adapter.py`. An adapter has:
 
 - `key`, `label`, `kind` (`cli`, `acp`, `api`).
-- `capabilities`: six flags the runtime and the API read instead of engine names.
+- `capabilities`: flags the runtime reads instead of engine names; the API exposes
+  the six public flags below other than the internal `memory_tools` flag.
 
   | Flag | Meaning |
   |---|---|
@@ -139,7 +140,7 @@ defaults (no capabilities, any model, a probe derived from `status()`).
 |---|---|---|---|---|
 | tools | yes | yes | yes | no |
 | approvals | yes | yes | yes | no |
-| mcp | yes (the computer's server) | no | no | no |
+| mcp | yes (team, memory and computer servers) | yes (team, memory and Docker computer servers) | read-only history search only | no |
 | images | yes (stream-json content blocks) | no | no | no |
 | resume | `--resume` | `thread/resume` | `session/load`, or the transcript as text | stored history each turn |
 | computers | yes | yes (Docker computers) | no | no |

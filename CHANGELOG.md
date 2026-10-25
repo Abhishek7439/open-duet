@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Publish an engine/platform capability matrix with separate source, automated,
+  live-provider and packaged-release gates; correct stale Codex MCP and browser
+  support descriptions.
+
 ## v0.4.0 (2026-10-25)
 
 ### Added

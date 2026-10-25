@@ -1,6 +1,6 @@
 # Structured browser tools
 
-Claude agents with an assigned Docker **desktop** computer get a private,
+Claude and Codex agents with an assigned Docker **desktop** computer get a private,
 visible Chromium browser when **Browser tools** is enabled in the Computer
 panel (off by default). Build the [desktop image](../desktop-image/README.md),
 then recreate older computers. Stop active turns before changing the setting;
@@ -63,6 +63,11 @@ and removal also stop its processes. This initial tool set uses the existing
 desktop viewer; a separate browser-only streaming panel is not included.
 
 ## Verification
+
+Source reviewed 2026-10-25 at `0ffb841`: both engines mount the computer MCP
+server. Scripted Codex protocol coverage does not establish a real-provider
+browser turn or packaged-app behavior; both remain open in the
+[capability matrix](CAPABILITIES.md).
 
 Run the approval/isolation boundary tests with:
 
