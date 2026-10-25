@@ -24,6 +24,7 @@ export type TranscriptItem =
   | NeedsYouItem
   | { kind: "team_notice"; key: string; turnId: number | null; tone: "incident" | "escalation" | "refused" | "retried"; text: string; threadId: number | null }
   | { kind: "team_setup"; key: string; turnId: number | null; requestId: string; undoAvailable: boolean; rows: { action: string; agentId: number; name: string; changes?: { field: string; before: unknown; after: unknown }[] }[] }
+  | { kind: "routine_change"; key: string; turnId: number | null; requestId: string; routineId: number; name: string; action: string; paused: boolean; note: string }
   | { kind: "agent_created"; key: string; turnId: number | null; agentId: number; name: string; title: string }
   | { kind: "user"; key: string; turnId: number | null; text: string; attachments: AttachmentRef[]; skills?: string[] }
   | {
@@ -362,6 +363,14 @@ export function applyEvent(state: Transcript, event: ThreadEvent): Transcript {
     case "team.agent.created": {
       if (typeof data.agent_id !== "number") return base;
       return { ...base, items: [...state.items, { kind: "agent_created", key, turnId: id, agentId: data.agent_id, name: text(data.name), title: text(data.title) }] };
+    }
+
+    case "routine.change.applied": {
+      const routine = data.routine as { id?: unknown; name?: unknown; paused?: unknown } | undefined;
+      if (typeof data.request_id !== "string" || typeof routine?.id !== "number" || typeof data.action !== "string") return base;
+      if (state.items.some(item => item.kind === "routine_change" && item.requestId === data.request_id)) return base;
+      return { ...base, items: [...state.items, { kind: "routine_change", key, turnId: id, requestId: data.request_id, routineId: routine.id,
+        name: text(routine.name), action: data.action, paused: routine.paused === true, note: text(data.undo_note) }] };
     }
 
     case "team.setup.applied": {

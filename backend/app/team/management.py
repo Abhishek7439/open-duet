@@ -8,7 +8,7 @@ from app.schemas.agent import AgentUpdateRequest
 from app.schemas.routine import RoutineCreateRequest, RoutineUpdateRequest
 from app.services import agent_memory, agent_skills, routine_schedule, routine_service
 from app.services.workspaces import require_workspace
-from app.team import fence, policy, service, setup
+from app.team import fence, policy, service, setup, routine_changes
 
 READS = ('list_management_capabilities', 'list_routines', 'preview_schedule', 'skills_list')
 WRITES = ('propose_profile', 'propose_model', 'create_routine', 'manage_routine', 'skill_manage')
@@ -112,8 +112,14 @@ async def _call(rt, run, name, args):
             if previous.lead_agent_id != run.agent_id or previous.thread_id != run.thread_id or previous.plan.get('_request_digest') != binding:
                 raise service.TeamError('request_conflict', 'This request_id belongs to another change or conversation.')
             result = setup.replay(previous)
+            undo_available = (await setup.undo_status(db, previous))['available']
+            # Recorder events use their own transaction. Release the receipt
+            # write lock before recording a replayed result card.
+            await db.commit()
             if previous.kind == 'setup' and result['state'] == 'applied':
-                await run.recorder.emit('team.setup.applied', {**result, 'undo_available': (await setup.undo_status(db, previous))['available']})
+                await run.recorder.emit('team.setup.applied', {**result, 'undo_available': undo_available})
+            if previous.kind == 'routine' and result['state'] == 'applied':
+                await run.recorder.emit('routine.change.applied', {**result, 'undo_available': undo_available})
             return result
         if await setup.busy(db, agent.id, except_thread=run.thread_id):
             raise service.TeamError('agent_busy', 'That agent is working. Try again when it is idle.')
@@ -164,6 +170,9 @@ async def _call(rt, run, name, args):
             data = RoutineCreateRequest.model_validate({**{key: value for key, value in args.items() if key in ROUTINE_FIELDS}, 'agent_id': agent.id, 'paused': True, 'approval_mode': 'ask'})
             routine = await routine_service.create_routine(db, rt.owner_id, setup.redacted(data.model_dump()), commit=False)
             result = {'routine': routine_info(routine), 'note': 'Saved paused. Review it in Routines; resume separately when the person explicitly asks.'}
+            undo = await routine_changes.capture(db, routine, 'create')
+            result['action'] = 'create'
+            receipt_kind = 'routine'
         elif name == 'manage_routine':
             strict(args, {'agent_id', 'request_id', 'routine_id', 'action', 'changes', 'expected_revision'})
             if type(args.get('routine_id')) is not int:
@@ -174,6 +183,9 @@ async def _call(rt, run, name, args):
             if args.get('expected_revision') != routine_info(routine)['revision']:
                 raise service.TeamError('changed_since', 'Read list_routines and include its current revision.')
             action = args.get('action')
+            if action != 'run_now':
+                undo = await routine_changes.capture(db, routine, action)
+                receipt_kind = 'routine'
             if action != 'update' and args.get('changes'):
                 raise service.TeamError('invalid_input', 'Only update accepts changes.')
             if action == 'update':
@@ -187,12 +199,16 @@ async def _call(rt, run, name, args):
                 queued = await routine_service.run_now(db, rt.owner_id, routine.id, commit=False)
                 result = {'run_id': queued.id, 'status': queued.state, 'note': 'Queued, not completed.'}
             elif action == 'delete':
+                if await routine_service._has_active_run(db, routine.id):
+                    raise service.TeamError('routine_busy', 'Wait for queued or active runs before deleting this routine.')
+                deleted_info = routine_info(routine)
                 await routine_service.delete_routine(db, rt.owner_id, routine.id, commit=False)
-                result = {'routine_id': routine.id, 'action': 'deleted'}
+                result = {'routine_id': routine.id, 'routine': deleted_info}
             else:
                 raise service.TeamError('invalid_input', 'Choose update, pause, resume, run_now or delete.')
             if action not in ('run_now', 'delete'):
                 result = {'routine': routine_info(routine)}
+            result['action'] = action
         elif name == 'skill_manage':
             strict(args, {'agent_id', 'request_id', 'action', 'name', 'description', 'body', 'expected_revision'})
             skill_name = agent_skills.check_name(args.get('name'))
@@ -211,6 +227,14 @@ async def _call(rt, run, name, args):
                       'note': 'Saved disabled. Review and enable in Agent settings; skill text grants no permissions.'}
         else:
             raise service.TeamError('unknown_tool', 'Unknown configuration tool.')
+        if receipt_kind == 'routine':
+            if undo['action'] != 'delete':
+                routine.updated_at = service.now()
+                await db.flush()
+                result['routine'] = routine_info(routine)
+                undo['hash'] = routine_changes.fingerprint(routine)
+                undo['runs'] = await routine_changes.runs_marker(db, routine.id)
+            result['undo_note'] = routine_changes.UNDO_NOTE
         await setup._authorizer(rt, run)(db)
         service.audit(db, team, name, agent_id=agent.id, thread_id=run.thread_id, data={'request_id': request_id})
         db.add(TeamSetupRequest(owner_id=rt.owner_id, team_id=team.id, lead_agent_id=run.agent_id,
@@ -220,4 +244,6 @@ async def _call(rt, run, name, args):
     response = {**result, 'request_id': request_id, 'state': 'applied', 'replayed': False}
     if receipt_kind == 'setup':
         await run.recorder.emit('team.setup.applied', {**response, 'undo_available': True})
+    if receipt_kind == 'routine':
+        await run.recorder.emit('routine.change.applied', response)
     return response

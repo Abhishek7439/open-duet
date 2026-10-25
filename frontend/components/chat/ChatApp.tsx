@@ -157,6 +157,11 @@ export function ChatApp() {
   // The Agents panel opened from New agent starts on the form.
   const [agentsCreate, setAgentsCreate] = useState(false);
   const [routinesOpen, setRoutinesOpen] = useState(false);
+  useEffect(() => {
+    const open = () => setRoutinesOpen(true);
+    window.addEventListener("open-dots:open-routines", open);
+    return () => window.removeEventListener("open-dots:open-routines", open);
+  }, []);
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
