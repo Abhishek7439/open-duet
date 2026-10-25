@@ -62,3 +62,8 @@ rows do not create notifications. Calendar and Gmail are explicitly unavailable;
 an unavailable connector is never reported as an empty day or inbox. New local
 question, task and completion queries each return at most 100 records; the
 compact card shows six rows and counts additional collected rows.
+
+Concurrent first visits and Today refreshes are serialized in the database,
+including across backend processes. The card, its notification and a new Today
+conversation commit together. Publishing locks the conversation before checking
+that it is idle, so it cannot insert a card after a turn starts.

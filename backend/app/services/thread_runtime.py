@@ -557,12 +557,14 @@ class ThreadRuntime:
         kind: str = "chat",
         job_id: int | None = None,
         room_id: int | None = None,
+        db=None,
     ) -> store.Thread:
         """A new thread for this runtime's owner. With `agent_id` the thread is
         started from that agent: its provider is used and its workspace is
         pinned now (later edits to the agent's workspace do not move the
         thread). Raises UnknownProvider, UnknownAgent, AgentArchived,
         AgentProviderMismatch, or OSError when the agent's folder is gone."""
+        destination_db = db
         agent = None
         if agent_id is not None:
             async with self.session() as db:
@@ -589,18 +591,19 @@ class ThreadRuntime:
             workspace.mkdir(parents=True, exist_ok=True)
         else:
             workspace = local_claude_runner.workspace_dir()
+        values = dict(
+            owner_id=self.owner_id, provider=provider, model=model, title=title,
+            provider_session_id=session_id,
+            session_state="new" if session_id is not None else "none",
+            workspace_path=str(workspace.resolve()),
+            agent_id=agent.id if agent is not None else None,
+            kind=kind, job_id=job_id, room_id=room_id,
+        )
+        if destination_db is not None:
+            # The caller owns the transaction, including rollback on failure.
+            return await store.create_thread(destination_db, **values, commit=False)
         async with self.session() as db:
-            return await store.create_thread(
-                db,
-                owner_id=self.owner_id,
-                provider=provider,
-                model=model,
-                title=title,
-                provider_session_id=session_id,
-                session_state="new" if session_id is not None else "none",
-                workspace_path=str(workspace.resolve()),
-                agent_id=agent.id if agent is not None else None, kind=kind, job_id=job_id, room_id=room_id,
-            )
+            return await store.create_thread(db, **values)
 
     async def reset_session(self, thread_id: int) -> store.Thread:
         """Start the thread's provider session over, so a broken thread is never
