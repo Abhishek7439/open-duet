@@ -30,6 +30,9 @@
 - Concurrent Today refreshes and first visits serialize their state and publish
   one card and notification. A failed publication rolls back its new chat too.
 
+- Routine writers and manual run admission reload the locked definition, so
+  concurrent Run now requests admit one run and a request following Undo uses
+  the restored settings instead of a stale prompt.
 - Delegation shutdown gives an active scheduler transaction time to finish and
   stops additional passes before cancelling it, reducing SQLite lock races.
 - Repeated Undo reports its saved state without accessing expired database

@@ -236,8 +236,13 @@ async def create_routine(
     return routine
 
 
-async def get_routine(db: AsyncSession, owner_id: str, routine_id: int) -> Routine:
-    routine = await db.get(Routine, routine_id)
+async def get_routine(
+    db: AsyncSession, owner_id: str, routine_id: int, *, lock: bool = False
+) -> Routine:
+    # Every writer (including manual admissions) shares the scheduler/webhook/
+    # Undo row lock. Refresh an already-loaded definition after waiting so its
+    # prompt, paused state and agent are those of the transaction we follow.
+    routine = await db.get(Routine, routine_id, with_for_update=lock, populate_existing=lock)
     if routine is None or routine.owner_id != owner_id:
         raise RoutineNotFound(routine_id)
     # Planner attempts are immutable receipts, controlled from the task. Do
@@ -260,7 +265,7 @@ async def update_routine(
 ) -> Routine:
     now = now or utcnow()
     await begin_write(db)
-    routine = await get_routine(db, owner_id, routine_id)
+    routine = await get_routine(db, owner_id, routine_id, lock=True)
     changes = {k: v for k, v in changes.items() if k in EDITABLE}
     if "agent_id" in changes:
         await _check_agent(db, owner_id, changes["agent_id"])
@@ -297,7 +302,7 @@ async def delete_routine(db: AsyncSession, owner_id: str, routine_id: int, *, co
     """Deletes the routine and its run history. Conversations its runs made
     stay, as ordinary conversations of the agent."""
     await begin_write(db)
-    routine = await get_routine(db, owner_id, routine_id)
+    routine = await get_routine(db, owner_id, routine_id, lock=True)
     await db.execute(delete(RoutineRun).where(RoutineRun.routine_id == routine.id))
     await db.delete(routine)
     await db.flush()
@@ -310,7 +315,7 @@ async def set_paused(
 ) -> Routine:
     now = now or utcnow()
     await begin_write(db)
-    routine = await get_routine(db, owner_id, routine_id)
+    routine = await get_routine(db, owner_id, routine_id, lock=True)
     routine.paused = paused
     routine.paused_reason = None
     if paused:
@@ -357,7 +362,7 @@ async def run_now(
 ) -> RoutineRun:
     now = now or utcnow()
     await begin_write(db)
-    routine = await get_routine(db, owner_id, routine_id)
+    routine = await get_routine(db, owner_id, routine_id, lock=True)
     if await _has_active_run(db, routine.id):
         raise RoutineBusy(routine_id)
     run = RoutineRun(
@@ -458,7 +463,7 @@ async def enable_webhook(db: AsyncSession, owner_id: str, routine_id: int) -> tu
     """Turn the webhook on, or replace its secret. The secret is returned here
     and never again."""
     await begin_write(db)
-    routine = await get_routine(db, owner_id, routine_id)
+    routine = await get_routine(db, owner_id, routine_id, lock=True)
     secret = "rt_" + secrets.token_urlsafe(32)
     routine.webhook_secret_hash = hash_secret(secret)
     await db.commit()
@@ -468,7 +473,7 @@ async def enable_webhook(db: AsyncSession, owner_id: str, routine_id: int) -> tu
 
 async def disable_webhook(db: AsyncSession, owner_id: str, routine_id: int) -> Routine:
     await begin_write(db)
-    routine = await get_routine(db, owner_id, routine_id)
+    routine = await get_routine(db, owner_id, routine_id, lock=True)
     routine.webhook_secret_hash = None
     await db.commit()
     await db.refresh(routine)
