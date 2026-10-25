@@ -378,3 +378,50 @@ async def test_due_tasks_are_inert_and_exclude_done_and_other_owners(sessions, r
     assert due[0]["thread_id"] is None
     async with sessions() as db:
         assert not list((await db.scalars(select(Routine).where(Routine.owner_id == owner))).all())
+
+
+@pytest.mark.parametrize('has_home', [False, True])
+async def test_concurrent_brief_instances_publish_one_card_and_notification(sessions, rt, owner, lead, has_home):
+    import asyncio
+    from app.db.models import Thread
+
+    if has_home:
+        await rt.create_thread(agent_id=lead.id)
+    instances = [make(rt, Clock(), [SIGNED_OUT]) for _ in range(4)]
+    opened = await asyncio.gather(*(ny.render(create=True) for ny in instances))
+    assert len({item['thread_id'] for item in opened}) == 1
+    async with sessions() as db:
+        threads = list(await db.scalars(select(Thread).where(Thread.owner_id == owner)))
+        cards = list(await db.scalars(select(Event).where(
+            Event.thread_id.in_([t.id for t in threads]), Event.type == needs_you.CARD_EVENT)))
+        notes = list(await db.scalars(select(Notification).where(Notification.owner_id == owner)))
+        state = await db.get(NeedsYouState, owner)
+    assert len(threads) == len(cards) == len(notes) == 1
+    assert cards[0].data['revision'] == state.card_revision == 1
+
+
+async def test_concurrent_first_presence_preserves_owner_state(sessions, rt, owner, lead):
+    import asyncio
+
+    responses = await asyncio.gather(*(make(rt, Clock(), [SIGNED_OUT]).presence('Asia/Kolkata')
+                                       for _ in range(4)))
+    assert sum(r['first_today'] for r in responses) == 1
+    async with sessions() as db:
+        state = await db.get(NeedsYouState, owner)
+        assert state.time_zone == 'Asia/Kolkata' and state.card_revision == 1
+        notes = list(await db.scalars(select(Notification).where(Notification.owner_id == owner)))
+    assert len(notes) == 1
+
+
+async def test_failed_card_publication_rolls_back_new_conversation(sessions, rt, owner, lead, monkeypatch):
+    from app.db.models import Thread
+
+    async def fail(*args, **kwargs):
+        raise RuntimeError('publication failed')
+
+    monkeypatch.setattr(store, '_add_event', fail)
+    with pytest.raises(RuntimeError, match='publication failed'):
+        await make(rt, Clock(), [SIGNED_OUT]).render(create=True)
+    async with sessions() as db:
+        assert not list(await db.scalars(select(Thread).where(Thread.owner_id == owner)))
+        assert await db.get(NeedsYouState, owner) is None

@@ -7,7 +7,7 @@ export type TeamJob = { id: number; root_id: number | null; parent_id: number | 
 export type RoomMember = { agent_id: number; name: string; held: boolean; member_thread_id: number | null };
 export type RoomDispatch = { id: number; agent_id: number; status: string; reason: string; turn_id: number | null; error_code: string | null };
 export type Room = { id: number; name: string; bulletin: string; thread_id: number; default_responder_kind: "member" | "everyone" | "mentions"; default_responder_agent_id: number | null; last_read_seq: number; last_seq: number; unread: number; members: RoomMember[]; dispatches: RoomDispatch[] };
-export type RoomMessage = { seq: number; text: string; author: { kind: string; agent_id?: number; label?: string }; source?: { thread_id?: number; routine_id?: number } | null; created_at: string };
+export type RoomMessage = { seq: number; text: string; author?: { kind: string; agent_id?: number; label?: string }; source?: { thread_id?: number; routine_id?: number } | null; created_at: string };
 export type RoomInput = { name: string; member_ids: number[]; bulletin?: string; default_responder_kind?: Room["default_responder_kind"]; default_responder_agent_id?: number | null };
 const post = (body: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(body) });
 const patch = (body: unknown): RequestInit => ({ method: "PATCH", body: JSON.stringify(body) });
@@ -30,7 +30,7 @@ export const collaboration = {
   rooms: () => request<Room[]>("/rooms"),
   room: (id: number) => request<Room>(`/rooms/${id}`),
   createRoom: (input: RoomInput) => request<Room>("/rooms", post(input)),
-  saveRoom: (id: number, input: Partial<RoomInput>) => request<Room>(`/rooms/${id}`, patch(input)),
+  saveRoom: (id: number, input: Partial<RoomInput> & { expected_member_ids?: number[] }) => request<Room>(`/rooms/${id}`, patch(input)),
   deleteRoom: (id: number) => request<void>(`/rooms/${id}`, { method: "DELETE" }),
   messages: (id: number) => request<RoomMessage[]>(`/rooms/${id}/messages`),
   postMessage: (id: number, text: string) => request<{ seq: number }>(`/rooms/${id}/messages`, post({ text })),

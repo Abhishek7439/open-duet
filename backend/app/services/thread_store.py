@@ -353,6 +353,7 @@ async def create_thread(
     kind: str = "chat",
     job_id: int | None = None,
     room_id: int | None = None,
+    commit: bool = True,
 ) -> Thread:
     if not provider.strip():
         raise ValueError("provider is required")
@@ -377,7 +378,8 @@ async def create_thread(
     )
     db.add(thread)
     await db.flush()
-    await db.commit()
+    if commit:
+        await db.commit()
     return thread
 
 

@@ -46,6 +46,14 @@ removes an unused routine. A deletion with no history may restore a new paused
 Ask-first definition, with a new identity and no webhook grant; deleted run
 history cannot be restored. Run-now has no Undo.
 
+Routine edits, pause/resume, deletion, webhook-grant changes and manual run
+admission share the same database lock as Undo and scheduled/webhook admission.
+After waiting, a writer reloads the current definition. Concurrent Run now
+requests therefore queue at most one active run, and a request following Undo
+uses the restored instructions rather than a previously read prompt. SQLite
+serializes these operations with its write transaction; PostgreSQL uses the
+routine row lock.
+
 Plan mode, unattended origins and chat-only paired-device sessions cannot use configuration tools to bypass their restrictions. Restricted origin is carried into delegated work and room messages. Membership and current lead authority are checked on the server.
 
 ## Remaining gaps

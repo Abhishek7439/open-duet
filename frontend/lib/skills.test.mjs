@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import { api } from './api.ts';
-import { isSkillName, parseSkillCommand, skillCompletions, skillErrorText, skillSkeleton, slugSkillName, sourceLabel, toggleSkill, usedSkills } from './skills.ts';
+import { isSkillName, learnableTurn, parseSkillCommand, skillCompletions, skillErrorText, skillSkeleton, slugSkillName, sourceLabel, toggleSkill, usedSkills } from './skills.ts';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -18,7 +18,7 @@ test('slugSkillName makes a valid name', () => {
   assert.equal(slugSkillName('  Review the Expenses! '), 'review-the-expenses');
   assert.equal(slugSkillName('Crème brûlée'), 'creme-brulee');
   assert.equal(slugSkillName('???'), '');
-  assert.equal(slugSkillName('a'.repeat(100)).length, 64);
+  assert.equal(slugSkillName('a'.repeat(100)).length, 48);
   assert.ok(isSkillName(slugSkillName('Weekly report 2')));
   assert.ok(!isSkillName('Bad Name') && !isSkillName('') && !isSkillName('a--b') && !isSkillName('-a'));
 });
@@ -87,4 +87,30 @@ test('small helpers', () => {
   assert.deepEqual(usedSkills({}), []);
   assert.equal(sourceLabel('imported'), 'Imported');
   assert.match(skillErrorText({ code: 'skill_unavailable', message: 'x' }), /no longer available/);
+});
+
+
+test('learn offers only the latest completed person request', () => {
+  const user = { kind: 'user', turnId: 7 };
+  assert.equal(learnableTurn([user]), null);
+  assert.equal(learnableTurn([user, { kind: 'turn_end', turnId: 7, status: 'failed' }]), null);
+  assert.equal(learnableTurn([user, { kind: 'turn_end', turnId: 7, status: 'completed' }]), 7);
+  assert.equal(learnableTurn([user, { kind: 'turn_end', turnId: 7, status: 'completed' }, { kind: 'user', turnId: 8 }]), null);
+});
+
+test('learn preview, reviewed save and revision-bound undo use distinct requests', async () => {
+  let calls = respond(200, {});
+  const source = { thread_id: 5, turn_id: 7 };
+  await api.learnSkill(3, source);
+  assert.match(calls[0].url, /skills\/learn$/);
+  assert.deepEqual(JSON.parse(calls[0].options.body), source);
+  calls = respond(201, {});
+  await api.saveLearnedSkill(3, 'review', { ...source, description: 'd', body: 'b', reviewed: true });
+  assert.match(calls[0].url, /skills\/learn\/review$/);
+  assert.equal(JSON.parse(calls[0].options.body).reviewed, true);
+  calls = respond(204);
+  await api.undoLearnedSkill(3, 'review', 'revision');
+  assert.match(calls[0].url, /skills\/review\/undo$/);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { revision: 'revision' });
+  assert.equal(sourceLabel('learned:5:7'), 'Learned from a run');
 });

@@ -15,6 +15,8 @@ this account only, and a symlink anywhere on the path is refused.
 """
 
 import os
+import hashlib
+from contextlib import contextmanager
 import re
 import tempfile
 from dataclasses import dataclass, field
@@ -66,6 +68,7 @@ class Skill:
     warnings: list[str] = field(default_factory=list)
     updated_at: datetime | None = None
     bytes: int = 0
+    revision: str = ""
 
 
 def check_name(name: str) -> str:
@@ -222,6 +225,7 @@ def _read_file(agent_id: int, name: str) -> Skill | None:
         warnings=warnings_for(body),
         updated_at=datetime.fromtimestamp(stat.st_mtime, UTC),
         bytes=stat.st_size,
+        revision=hashlib.sha256(f"{stat.st_mtime_ns}:{stat.st_ino}:".encode() + text.encode()).hexdigest(),
     )
     return skill
 
@@ -250,7 +254,51 @@ def read_skill(agent_id: int, name: str) -> Skill:
     return skill
 
 
+@contextmanager
+def _mutation_lock(agent_id: int):
+    """Serialize app mutations across workers; the lock is outside skill folders.
+
+    Never unlink the lock file: another worker may already hold it open.
+    Local edits outside the app are detected by revision but cannot share this lock.
+    """
+    root = _skills_root(agent_id, create=True)
+    path = root.parent / ".skills.lock"
+    if path.is_symlink():
+        raise SkillError(409, "skill_path_unsafe", "The skills lock is a link, so it is not used.")
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "r+b") as handle:
+        if os.name == "nt":
+            import msvcrt
+            if os.fstat(handle.fileno()).st_size == 0:
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def write_skill(
+    agent_id: int, name: str, description: str, body: str, *, enabled: bool = True,
+    source: str = "user", create_only: bool = False,
+) -> Skill:
+    check_name(name)
+    with _mutation_lock(agent_id):
+        if create_only and (_skill_dir(agent_id, name) / SKILL_FILE).exists():
+            raise SkillError(409, "skill_exists", "A skill with this name already exists. Choose another name.")
+        return _write_skill(agent_id, name, description, body, enabled=enabled, source=source)
+
+
+def _write_skill(
     agent_id: int, name: str, description: str, body: str, *, enabled: bool = True, source: str = "user"
 ) -> Skill:
     check_name(name)
@@ -281,7 +329,17 @@ def write_skill(
     return saved
 
 
-def delete_skill(agent_id: int, name: str) -> None:
+def delete_skill(agent_id: int, name: str, *, expected_revision: str | None = None) -> None:
+    check_name(name)
+    with _mutation_lock(agent_id):
+        if expected_revision is not None:
+            current = read_skill(agent_id, name)
+            if current.revision != expected_revision or not current.source.startswith("learned:"):
+                raise SkillError(409, "skill_undo_stale", "This skill changed after it was saved. Undo would remove a later edit.")
+        _delete_skill(agent_id, name)
+
+
+def _delete_skill(agent_id: int, name: str) -> None:
     directory = _skill_dir(agent_id, name)
     path = directory / SKILL_FILE
     if not directory.is_dir() or not (path.is_file() or path.is_symlink()):

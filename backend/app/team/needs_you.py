@@ -319,11 +319,19 @@ class NeedsYou:
         return [issue.public() for issue in report["issues"]]
 
     async def _state(self, db) -> NeedsYouState:
-        state = await db.get(NeedsYouState, self.owner_id)
-        if state is None:
-            state = NeedsYouState(owner_id=self.owner_id, notified=[], card_revision=0)
-            db.add(state)
-        return state
+        # INSERT + row lock also serializes the first visit across backends,
+        # where there is no existing state row to lock yet. SQLite callers
+        # already hold BEGIN IMMEDIATE; PostgreSQL waits on the owner key.
+        if db.get_bind().dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert
+        await db.execute(insert(NeedsYouState).values(
+            owner_id=self.owner_id, notified=[], card_revision=0,
+        ).on_conflict_do_nothing(index_elements=[NeedsYouState.owner_id]))
+        return await db.scalar(select(NeedsYouState).where(
+            NeedsYouState.owner_id == self.owner_id).with_for_update()
+            .execution_options(populate_existing=True))
 
     async def read(self) -> dict:
         """The card as it would be written now, with no side effects."""
@@ -425,11 +433,11 @@ class NeedsYou:
             if thread_id is None:
                 thread_id = await self._home(db, state, lead_id)
             if thread_id is None:
-                await db.rollback()
-                thread = await self.runtime.create_thread(agent_id=lead_id, title="Today")
+                thread = await self.runtime.create_thread(agent_id=lead_id, title="Today", db=db)
                 thread_id = thread.id
-                await begin_write(db)
-                state = await self._state(db)
+            # Serialize with start_turn too: a turn cannot start between the
+            # quiet-thread check and publication of the card.
+            await store._locked_thread(db, thread_id)
             if await store.running_turn_id(db, thread_id) is not None:
                 # Never write into a running turn; the next tick tries again.
                 await db.rollback()

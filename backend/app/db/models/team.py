@@ -134,6 +134,7 @@ class RoomMember(Base):
     last_seen_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default='0')
     held_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     added_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, server_default=func.now())
+    removed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
 
 class RoomDispatch(Base):

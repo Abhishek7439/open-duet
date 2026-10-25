@@ -16,6 +16,16 @@ Send a message with up to three skill names (`skills` on `POST /threads/{id}/tur
 
 A skill that is unknown, turned off, repeated, or chosen in a conversation with no agent refuses the message with `422 skill_unavailable`. Nothing is started.
 
+## Learn from a completed conversation
+
+After a successful person-authored chat turn, **Save as skill** opens an editable draft from that turn's request and result. The server checks that the conversation belongs to the current owner and agent. Failed, cancelled, interrupted, running, routine, webhook and peer turns cannot be used. No model is called and no commands are inferred or replayed.
+
+The draft includes purpose, required inputs, steps, validation, output and approval sections, plus a quoted run reference. Only the request (up to 3,000 UTF-8 bytes) and final result (up to 6,000 UTF-8 bytes) are copied, after secret redaction. Tool logs, attachment contents, files and recalled notes are not copied. Review and replace the workflow sections; a completed run is not proof that a reusable skill works. Remove private or task-specific details from the reference.
+
+Check the review acknowledgement and choose **Save skill**. The save creates a new name only and starts switched off, retaining `learned:<thread id>:<turn id>` provenance. It cannot overwrite a skill created by another tab. **Undo save** removes only that unchanged creation: a later edit, enable/disable, replacement or delete-and-recreate makes the receipt stale. App mutations share a per-agent file lock across backend workers; manual external file edits do not share that lock. The API returns a revision with each skill, so a receipt can be retained independently of the open editor.
+
+To reuse it, explicitly switch it on, then choose it for a message or type `/skill-name`. Test with a second input and inspect the result before routine use. Saving a learned skill neither enables it nor invokes it, schedules a routine, changes an approval, or grants a tool.
+
 ## API
 
 All routes are local-access only, like the agents routes. Errors are `{"detail": {"error_code", "message"}}`.
@@ -26,6 +36,9 @@ All routes are local-access only, like the agents routes. Errors are `{"detail":
 | `GET /agents/{id}/skills/{name}` | the skill with `body`, `redacted` (count) and `warnings` |
 | `PUT /agents/{id}/skills/{name}` | create or replace: `{description, body, enabled, source}` |
 | `DELETE /agents/{id}/skills/{name}` | remove it |
+| `POST /agents/{id}/skills/learn` | `{thread_id, turn_id}` prepares a bounded editable draft without saving |
+| `POST /agents/{id}/skills/learn/{name}` | `{thread_id, turn_id, description, body, reviewed: true}` creates the reviewed skill switched off; existing names return `409 skill_exists` |
+| `POST /agents/{id}/skills/{name}/undo` | `{revision}` removes an unchanged learned creation; later edits return `409 skill_undo_stale` |
 | `POST /agents/{id}/skills/import` | `{markdown}` becomes a preview (`name, description, body, warnings`). Nothing is saved; save the reviewed result with `PUT`, turned off until you have read it |
 
 Warnings flag text that tells the agent to ignore its instructions or skip approvals. They are advice for the reviewer, not a block.
@@ -36,4 +49,4 @@ An agent export can include skills (`include_skills=true`; off by default). On i
 
 ## What was not run
 
-Covered by tests on SQLite with a scripted engine: the files, limits, redaction, links, preview, the prompt text, refusal, events and the agent-file round trip. Not run: PostgreSQL (skills use no database tables), a real model following a skill, Windows file permissions, and phone or desktop screens for the skills UI.
+Covered by tests on SQLite with a scripted engine: the files, limits, redaction, links, preview, the prompt text, refusal, events and the agent-file round trip. Learn-from-run additionally covers source ownership/origin/status, reviewed create-only save, provenance, revision-bound Undo, cross-worker write/Undo serialization, and explicit invocation on a second fixture. The source lookup reads existing thread/turn tables; no skill tables or migration were added. Not run: PostgreSQL source lookup, a real model following a skill, the Windows file-lock branch and file permissions, and phone or desktop screens for the skills UI.

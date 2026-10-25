@@ -4,6 +4,17 @@
 
 ### Added
 
+- Save as skill now prepares a bounded, redacted draft from a successful chat
+  turn's request and result, with source provenance and editable workflow sections.
+  Explicit reviewed saves create a new disabled skill; revision-bound Undo refuses
+  later edits. Existing skill selection invokes it only when explicitly chosen.
+  SQLite/scripted-engine and cross-worker file-lock tests cover the workflow;
+  real-provider, Windows and packaged UI qualification remain open.
+
+- Edit an existing room's roster while keeping conversation and work history.
+  Removal skips queued replies, refuses members whose work is still settling,
+  and records a room notice. Re-adding reuses history without replaying old work;
+  stale concurrent roster edits are refused.
 - Routine changes made through chat have dedicated result cards and owner-only
   Undo. Undo refuses stale settings or executions and restores definitions paused,
   without replaying runs or restoring webhook grants/history.
@@ -16,6 +27,15 @@
 
 ### Fixed
 
+- Concurrent Today refreshes and first visits serialize their state and publish
+  one card and notification. A failed publication rolls back its new chat too.
+
+- Routine writers and manual run admission reload the locked definition, so
+  concurrent Run now requests admit one run and a request following Undo uses
+  the restored settings instead of a stale prompt.
+- Room reply completion locks the room before its dispatch, matching Stop and
+  roster edits, and rechecks the dispatch after waiting. This avoids a
+  PostgreSQL deadlock when a reply finishes during a concurrent room change.
 - Delegation shutdown gives an active scheduler transaction time to finish and
   stops additional passes before cancelling it, reducing SQLite lock races.
 - Repeated Undo reports its saved state without accessing expired database

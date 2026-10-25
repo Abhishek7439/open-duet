@@ -42,8 +42,11 @@ class Rooms:
             raise teams.TeamError('room_not_found', 'Room not found.')
         return room
 
-    async def members(self, db, room_id):
-        return list((await db.execute(select(RoomMember).where(RoomMember.room_id == room_id).order_by(RoomMember.id))).scalars())
+    async def members(self, db, room_id, *, include_removed=False):
+        query = select(RoomMember).where(RoomMember.room_id == room_id)
+        if not include_removed:
+            query = query.where(RoomMember.removed_at.is_(None))
+        return list((await db.execute(query.order_by(RoomMember.id))).scalars())
 
     async def detail(self, room_id):
         async with self.rt.session() as db:
@@ -111,6 +114,8 @@ class Rooms:
     async def update(self, room_id, data):
         async with self.rt.session() as db:
             await begin_write(db)
+            # Dispatch claim and message routing take this same lock. Either a
+            # removal cancels queued work, or claim wins and removal is refused.
             room = await self.get(db, room_id, lock=True)
             if 'name' in data:
                 room.name = teams.clean_line(data['name'], 80, 'Room name')
@@ -119,13 +124,62 @@ class Rooms:
                     raise teams.TeamError('invalid_bulletin', 'Shared instructions are too long.')
                 room.bulletin = data['bulletin']
             members = await self.members(db, room_id)
+            current = {m.agent_id for m in members}
+            selected = current
+            if 'member_ids' in data:
+                identifiers, expected = data['member_ids'], data.get('expected_member_ids')
+                if not isinstance(identifiers, list) or not 1 <= len(identifiers) <= 12 or any(type(i) is not int for i in identifiers) or len(set(identifiers)) != len(identifiers):
+                    raise teams.TeamError('invalid_members', 'Choose between one and twelve distinct members.')
+                if not isinstance(expected, list) or any(type(i) is not int for i in expected) or len(set(expected)) != len(expected) or set(expected) != current:
+                    raise teams.TeamError('roster_conflict', 'The room roster changed. Reopen room settings before saving.')
+                selected = set(identifiers)
             kind = data.get('default_responder_kind', room.default_responder_kind)
             default = data.get('default_responder_agent_id', room.default_responder_agent_id)
-            if kind not in ('member', 'everyone', 'mentions') or (kind == 'member' and default not in {m.agent_id for m in members}):
-                raise teams.TeamError('invalid_responder', 'The default responder must be a member.')
+            if kind not in ('member', 'everyone', 'mentions') or (kind == 'member' and default not in selected):
+                raise teams.TeamError('invalid_responder', 'Choose a default responder from the new roster.')
+            removed, added = current - selected, selected - current
+            if removed or added:
+                # A stopped provider can still be settling. Do not detach its
+                # membership or work thread until the turn really terminates.
+                thread_ids = [m.member_thread_id for m in members if m.agent_id in removed and m.member_thread_id]
+                busy = await db.scalar(select(RoomDispatch.id).where(RoomDispatch.room_id == room_id, RoomDispatch.agent_id.in_(removed), RoomDispatch.status == 'running').limit(1))
+                active_turn = await db.scalar(select(Turn.id).where(Turn.thread_id.in_(thread_ids), Turn.status == 'running').limit(1))
+                if busy or active_turn:
+                    raise teams.TeamError('member_busy', 'Stop the member and wait for their work to finish before removing them.')
+                team = await teams.team_for(db, self.rt.owner_id)
+                # Match person-created rooms: standalone owner agents are valid;
+                # agents assigned to a team must belong to this owner's team.
+                for identifier in added:
+                    agent = await teams.member(db, self.rt.owner_id, identifier)
+                    if agent.team_id is not None and (team is None or agent.team_id != team.id):
+                        raise teams.TeamError('unreachable_agent', 'That agent is outside this team.')
+                all_members = {m.agent_id: m for m in await self.members(db, room_id, include_removed=True)}
+                timestamp = teams.now()
+                thread = await db.get(Thread, room.thread_id)
+                for identifier in removed:
+                    all_members[identifier].removed_at = timestamp
+                queued = list((await db.execute(select(RoomDispatch).where(RoomDispatch.room_id == room_id, RoomDispatch.agent_id.in_(removed), RoomDispatch.status.in_(('queued', 'failed', 'stopped'))))).scalars())
+                for row in queued:
+                    if row.status == 'queued':
+                        row.status, row.finished_at = 'skipped', timestamp
+                    row.error_code = 'member_removed'
+                for identifier in added:
+                    if identifier in all_members:
+                        member = all_members[identifier]
+                        member.removed_at, member.held_at = None, None
+                        member.last_seen_seq = thread.last_seq
+                    else:
+                        db.add(RoomMember(room_id=room_id, agent_id=identifier, last_seen_seq=thread.last_seq))
+                await thread_store._add_event(db, room.thread_id, 'room.notice', {
+                    'kind': 'roster_changed', 'author': {'kind': 'system', 'label': 'Room'},
+                    'added_agent_ids': sorted(added), 'removed_agent_ids': sorted(removed),
+                    'text': 'Room roster updated. Added: ' + (', '.join(str(i) for i in sorted(added)) or 'none')
+                            + '. Removed: ' + (', '.join(str(i) for i in sorted(removed)) or 'none') + '.',
+                }, None)
             room.default_responder_kind, room.default_responder_agent_id = kind, default if kind == 'member' else None
             room.updated_at = teams.now()
             await db.commit()
+        self.rt.hub.notify(room.thread_id)
         return await self.detail(room_id)
 
     async def check_budget(self, db, room, agent_id, text):
@@ -220,7 +274,7 @@ class Rooms:
             row = await db.scalar(select(RoomDispatch).where(RoomDispatch.room_id == room_id, RoomDispatch.status == 'queued').order_by(RoomDispatch.id).limit(1))
             if row is None:
                 return
-            member = await db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.agent_id == row.agent_id))
+            member = await db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.agent_id == row.agent_id, RoomMember.removed_at.is_(None)))
             agent = await db.get(Agent, row.agent_id)
             if member is None or member.held_at or agent is None or agent.archived_at or agent.owner_id != self.rt.owner_id:
                 row.status, row.finished_at = 'skipped', teams.now()
@@ -229,6 +283,8 @@ class Rooms:
             row.status, row.started_at = 'running', teams.now()
             await db.commit()
         try:
+            if await self._stop_before_start(row.id):
+                return
             if member.member_thread_id is None:
                 thread = await self.rt.create_thread(agent_id=agent.id, title=f'{room.name}: {agent.name}', kind='room_member', room_id=room_id)
                 async with self.rt.session() as db:
@@ -237,6 +293,8 @@ class Rooms:
                     stored.member_thread_id = thread.id
                     await db.commit()
                 member.member_thread_id = thread.id
+            if await self._stop_before_start(row.id):
+                return
             prompt, seen, origin = await self.window(room_id, member.id)
             turn = await self.rt.send_turn(member.member_thread_id, prompt, internal=True, team_origin=origin)
             self.origins[turn.id] = origin
@@ -257,12 +315,25 @@ class Rooms:
                         active.stop_requested = True
                         active.ctx.abort()
                     return
+                if dispatch.reason == 'stop_requested':
+                    active = self.rt._runs.get(turn.id)
+                    if active:
+                        active.stop_requested = True
+                        active.ctx.abort()
                 if current is None or current.status != 'running':
                     await self.finish(row.id, current)
                     return
                 await asyncio.sleep(.3)
         except Exception as exc:
             await self.finish(row.id, None, error=str(exc))
+
+    async def _stop_before_start(self, dispatch_id):
+        async with self.rt.session() as db:
+            row = await db.get(RoomDispatch, dispatch_id)
+            stopped = row is None or row.status != 'running' or row.reason == 'stop_requested'
+        if stopped:
+            await self.finish(dispatch_id, None)
+        return stopped
 
     async def window(self, room_id, member_id):
         async with self.rt.session() as db:
@@ -308,17 +379,27 @@ class Rooms:
         noted = None
         async with self.rt.session() as db:
             await begin_write(db)
-            row = await db.get(RoomDispatch, dispatch_id, with_for_update=True)
-            if row is None or row.status != 'running':
+            room_id = await db.scalar(select(RoomDispatch.room_id).where(RoomDispatch.id == dispatch_id))
+            if room_id is None:
                 return
-            room = await db.get(Room, row.room_id, with_for_update=True)
+            # Claim, Stop and roster edits all lock room before dispatch. Do
+            # not hold the dispatch while waiting for that room: a Stop may
+            # already own the room and need to update this very dispatch.
+            room = await db.get(Room, room_id, with_for_update=True, populate_existing=True)
+            row = await db.get(RoomDispatch, dispatch_id, with_for_update=True, populate_existing=True)
+            # The unlocked lookup above only located the parent. Revalidate
+            # after waiting: a preceding writer may have settled/deleted work.
+            if row is None or row.room_id != room_id or row.status != 'running':
+                return
             if room is None or room.deleting_at:
                 row.status, row.finished_at = 'stopped', teams.now()
                 await db.commit()
                 return
-            member = await db.scalar(select(RoomMember).where(RoomMember.room_id == row.room_id, RoomMember.agent_id == row.agent_id))
+            member = await db.scalar(select(RoomMember).where(RoomMember.room_id == row.room_id, RoomMember.agent_id == row.agent_id, RoomMember.removed_at.is_(None)))
             agent = await db.get(Agent, row.agent_id)
-            if not member or not agent or agent.archived_at:
+            if row.reason == 'stop_requested':
+                row.status, row.error_code = 'stopped', None
+            elif not member or not agent or agent.archived_at:
                 row.status, row.error_code = 'failed', 'member_removed'
             elif turn and turn.status == 'succeeded':
                 result = (turn.result or '').strip()
@@ -357,7 +438,10 @@ class Rooms:
                 query = query.where(RoomDispatch.agent_id == agent_id)
             rows = list((await db.execute(query)).scalars())
             for row in rows:
-                row.status, row.finished_at = 'stopped', teams.now()
+                if row.status == 'queued':
+                    row.status, row.finished_at = 'stopped', teams.now()
+                else:
+                    row.reason = 'stop_requested'
             await db.commit()
         for row in rows:
             active = self.rt._runs.get(row.turn_id)
@@ -370,7 +454,7 @@ class Rooms:
         async with self.rt.session() as db:
             await begin_write(db)
             room = await self.get(db, room_id, lock=True)
-            member = await db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.agent_id == agent_id))
+            member = await db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.agent_id == agent_id, RoomMember.removed_at.is_(None)))
             if member is None:
                 raise teams.TeamError('not_room_member', 'No such room member.')
             member.held_at = teams.now() if held else None
@@ -404,7 +488,7 @@ class Rooms:
             room.deleting_at = teams.now()
             await db.commit()
         async with self.rt.session() as db:
-            members = await self.members(db, room_id)
+            members = await self.members(db, room_id, include_removed=True)
         for identifier in [m.member_thread_id for m in members if m.member_thread_id] + [room.thread_id]:
             active = next((r for r in self.rt._runs.values() if r.thread_id == identifier), None)
             if active:

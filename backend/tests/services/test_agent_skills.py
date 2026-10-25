@@ -141,3 +141,90 @@ def test_resolve_accepts_enabled_named_skills_only():
     assert "ON BODY" in block and "OTHER BODY" not in block and "OFF BODY" not in block
     assert "grant no permission" in block
     assert skills.prompt_block([]) == ""
+
+
+def test_create_only_and_undo_preserve_later_identical_saves_and_recreation(home):
+    first = skills.write_skill(1, "draft", "d", "b", enabled=False, source="learned:2:3", create_only=True)
+    assert code(skills.write_skill, 1, "draft", "d", "b", create_only=True) == "skill_exists"
+    second = skills.write_skill(1, "draft", "d", "b", enabled=False, source="learned:2:3")
+    assert first.revision != second.revision
+    assert code(skills.delete_skill, 1, "draft", expected_revision=first.revision) == "skill_undo_stale"
+    skills.delete_skill(1, "draft")
+    third = skills.write_skill(1, "draft", "d", "b", enabled=False, source="learned:2:3")
+    assert third.revision != second.revision
+    assert code(skills.delete_skill, 1, "draft", expected_revision=second.revision) == "skill_undo_stale"
+    skills.delete_skill(1, "draft", expected_revision=third.revision)
+    assert skills.list_skills(1) == []
+
+
+def test_undo_detects_external_edits_and_symlinked_lock(home):
+    saved = skills.write_skill(1, "draft", "d", "b", source="learned:2:3")
+    path = home / "agents/1/skills/draft/SKILL.md"
+    path.write_text(path.read_text() + "new edit")
+    assert code(skills.delete_skill, 1, "draft", expected_revision=saved.revision) == "skill_undo_stale"
+    folder = home / "agents/2"
+    folder.mkdir()
+    os.symlink(path, folder / ".skills.lock")
+    assert code(skills.write_skill, 2, "draft", "d", "b") == "skill_path_unsafe"
+
+
+def _concurrent_skill_write(home, entered, release):
+    """A different backend worker holds the file lock while making a later edit."""
+    from pathlib import Path
+    local_claude_runner.workspace_dir = lambda: Path(home)
+    original = skills._write_skill
+
+    def delayed(*args, **kwargs):
+        entered.set()
+        if not release.wait(10):
+            raise RuntimeError("writer release timed out")
+        return original(*args, **kwargs)
+
+    skills._write_skill = delayed
+    skills.write_skill(1, "draft", "d", "later", source="learned:2:3")
+
+
+def _concurrent_skill_undo(home, revision, entered, result):
+    from pathlib import Path
+    local_claude_runner.workspace_dir = lambda: Path(home)
+    entered.set()
+    try:
+        skills.delete_skill(1, "draft", expected_revision=revision)
+        result.put("removed")
+    except skills.SkillError as exc:
+        result.put(exc.code)
+
+
+def test_undo_waits_for_another_backend_worker_and_refuses_its_later_edit(home):
+    import multiprocessing
+    import queue
+
+    first = skills.write_skill(1, "draft", "d", "before", source="learned:2:3")
+    ctx = multiprocessing.get_context("spawn")
+    writing, release, undoing = ctx.Event(), ctx.Event(), ctx.Event()
+    result = ctx.Queue()
+    writer = ctx.Process(target=_concurrent_skill_write, args=(str(home), writing, release))
+    undoer = ctx.Process(target=_concurrent_skill_undo, args=(str(home), first.revision, undoing, result))
+    try:
+        writer.start()
+        assert writing.wait(10)
+        undoer.start()
+        assert undoing.wait(10)
+        # Undo cannot inspect the old revision while a worker owns the lock,
+        # then delete that worker's replacement after it commits.
+        with pytest.raises(queue.Empty):
+            result.get(timeout=0.1)
+        release.set()
+        assert result.get(timeout=10) == "skill_undo_stale"
+        writer.join(10)
+        undoer.join(10)
+        assert writer.exitcode == undoer.exitcode == 0
+        assert skills.read_skill(1, "draft").body == "later"
+    finally:
+        release.set()
+        for process in (writer, undoer):
+            if process.pid is not None:
+                if process.is_alive():
+                    process.terminate()
+                process.join(10)
+        result.close()
