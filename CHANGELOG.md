@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- Routine changes made through chat have dedicated result cards and owner-only
+  Undo. Undo refuses stale settings or executions and restores definitions paused,
+  without replaying runs or restoring webhook grants/history.
+- A source-linked local Today brief extends the existing Needs you card with
+  questions, routine outcomes, durable engine problems and due tasks. Calendar
+  and Gmail remain unavailable; empty and duplicate updates stay quiet.
+- Separate opt-in Linux network isolation preview: private network namespace,
+  per-turn UNIX-socket bridge and DNS-pinned public HTTP(S)-only gate. Real Linux
+  and provider qualification remain open.
+
+### Fixed
+
+- Delegation shutdown gives an active scheduler transaction time to finish and
+  stops additional passes before cancelling it, reducing SQLite lock races.
+- Repeated Undo reports its saved state without accessing expired database
+  attributes after rollback.
+
 ## v0.4.1 (2026-10-25)
 
 ### Added

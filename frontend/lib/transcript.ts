@@ -17,13 +17,14 @@ export type AttachmentRef = { id: string; name: string; mime: string; bytes: num
 
 export type TeamJobItem = { kind: "team_job"; key: string; turnId: number | null; jobId: number; agentId: number; threadId: number | null; mode: string; brief: string; status: string; result: string; outcome: string };
 
-export type NeedsYouItem = { kind: "needs_you"; key: string; turnId: number | null; cardId: string; revision: number; title: string; subtitle: string; emptyText: string; more: number; rows: NeedsYouRow[] };
+export type NeedsYouItem = { kind: "needs_you"; key: string; turnId: number | null; cardId: string; revision: number; title: string; subtitle: string; emptyText: string; more: number; checkedAt?: string; timeZone?: string; sources?: Record<string, string>; rows: NeedsYouRow[] };
 
 export type TranscriptItem =
   | TeamJobItem
   | NeedsYouItem
   | { kind: "team_notice"; key: string; turnId: number | null; tone: "incident" | "escalation" | "refused" | "retried"; text: string; threadId: number | null }
   | { kind: "team_setup"; key: string; turnId: number | null; requestId: string; undoAvailable: boolean; rows: { action: string; agentId: number; name: string; changes?: { field: string; before: unknown; after: unknown }[] }[] }
+  | { kind: "routine_change"; key: string; turnId: number | null; requestId: string; routineId: number; name: string; action: string; paused: boolean; note: string }
   | { kind: "agent_created"; key: string; turnId: number | null; agentId: number; name: string; title: string }
   | { kind: "user"; key: string; turnId: number | null; text: string; attachments: AttachmentRef[]; skills?: string[] }
   | {
@@ -364,6 +365,14 @@ export function applyEvent(state: Transcript, event: ThreadEvent): Transcript {
       return { ...base, items: [...state.items, { kind: "agent_created", key, turnId: id, agentId: data.agent_id, name: text(data.name), title: text(data.title) }] };
     }
 
+    case "routine.change.applied": {
+      const routine = data.routine as { id?: unknown; name?: unknown; paused?: unknown } | undefined;
+      if (typeof data.request_id !== "string" || typeof routine?.id !== "number" || typeof data.action !== "string") return base;
+      if (state.items.some(item => item.kind === "routine_change" && item.requestId === data.request_id)) return base;
+      return { ...base, items: [...state.items, { kind: "routine_change", key, turnId: id, requestId: data.request_id, routineId: routine.id,
+        name: text(routine.name), action: data.action, paused: routine.paused === true, note: text(data.undo_note) }] };
+    }
+
     case "team.setup.applied": {
       if (typeof data.request_id !== "string" || !Array.isArray(data.results)) return base;
       const rows = data.results.flatMap((row: unknown) => {
@@ -412,12 +421,15 @@ export function applyEvent(state: Transcript, event: ThreadEvent): Transcript {
       if (previous && previous.revision >= revision) return base;
       const rows = data.items.flatMap((row: unknown): NeedsYouRow[] => {
         const r = row as Partial<NeedsYouRow>;
-        return typeof r?.key === "string" && typeof r.kind === "string" ? [{ kind: r.kind, key: r.key, title: text(r.title), detail: typeof r.detail === "string" ? r.detail : null, thread_id: typeof r.thread_id === "number" ? r.thread_id : null }] : [];
+        return typeof r?.key === "string" && typeof r.kind === "string" ? [{ kind: r.kind, key: r.key, title: text(r.title), detail: typeof r.detail === "string" ? r.detail : null, thread_id: typeof r.thread_id === "number" ? r.thread_id : null, at: typeof r.at === "string" ? r.at : null, source: typeof r.source === "string" ? r.source : undefined, routine_id: typeof r.routine_id === "number" ? r.routine_id : null, work_item_id: typeof r.work_item_id === "number" ? r.work_item_id : null }] : [];
       });
       const item: NeedsYouItem = {
         kind: "needs_you", key: previous?.key ?? key, turnId: null, cardId: data.card_id, revision,
         title: text(data.title) || "Needs you", subtitle: text(data.subtitle), emptyText: text(data.empty_text) || "Nothing needs you right now.",
         more: typeof data.more === "number" ? data.more : 0, rows,
+        checkedAt: typeof data.checked_at === "string" ? data.checked_at : undefined,
+        timeZone: typeof data.time_zone === "string" ? data.time_zone : undefined,
+        sources: data.sources && typeof data.sources === "object" ? data.sources as Record<string, string> : undefined,
       };
       return { ...base, items: previous ? state.items.map((entry) => (entry === previous ? item : entry)) : [...state.items, item] };
     }

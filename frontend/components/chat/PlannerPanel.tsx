@@ -21,8 +21,8 @@ const dragType = "application/x-open-dots-work-item";
 const priorities = ["low", "normal", "high", "urgent"] as const;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "Could not load the planner.";
 
-export function PlannerPanel({ agents, threads, onClose, onOpenRoutines }: {
-  agents: Agent[]; threads: Thread[]; onClose: () => void; onOpenRoutines: () => void;
+export function PlannerPanel({ agents, threads, onClose, onOpenRoutines, taskId = null }: {
+  agents: Agent[]; threads: Thread[]; onClose: () => void; onOpenRoutines: () => void; taskId?: number | null;
 }) {
   const [board, setBoard] = useState<WorkBoard | null>(null);
   const [items, setItems] = useState<WorkItem[] | null>(null);
@@ -40,7 +40,11 @@ export function PlannerPanel({ agents, threads, onClose, onOpenRoutines }: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
-  const [editor, setEditor] = useState<Editor | null>(null);
+  const [chosenEditor, chooseEditor] = useState<Editor | null>(null);
+  const [requestedTaskId, requestTask] = useState(taskId);
+  const requestedTask = items?.find(item => item.id === requestedTaskId);
+  const editor = chosenEditor ?? (requestedTask ? { item: requestedTask } : null);
+  const setEditor = (next: Editor | null) => { requestTask(null); chooseEditor(next); };
   const [executionItem, setExecutionItem] = useState<WorkItem | null>(null);
   const [conflictItem, setConflictItem] = useState<WorkItem | null>(null);
   const mutationVersion = useRef(0);

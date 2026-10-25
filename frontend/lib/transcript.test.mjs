@@ -12,6 +12,19 @@ function reset() {
   seq = 0;
 }
 
+test('routine receipts fold retries into one actionable result card', () => {
+  reset();
+  const data = { request_id: 'receipt', action: 'create', routine: { id: 9, name: 'Morning', paused: true },
+    undo_note: 'Undo restores settings paused.' };
+  const t = run([ev('routine.change.applied', data), ev('routine.change.applied', data),
+    ev('routine.change.applied', { request_id: 'malformed' })]);
+  assert.equal(t.items.length, 1);
+  assert.equal(t.items[0].kind, 'routine_change');
+  assert.equal(t.items[0].routineId, 9);
+  assert.equal(t.items[0].paused, true);
+  assert.equal(t.items[0].requestId, 'receipt');
+});
+
 test('a plain turn reads in order and ends with nothing running', () => {
   reset();
   const t = run([

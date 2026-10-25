@@ -1445,6 +1445,7 @@ class ThreadRuntime:
         """The app is (re)starting in this process: turns may start again."""
         self._closing = False
         self.capture.reopen()
+        self.team_jobs.reopen()
 
     async def shutdown(self) -> None:
         """This process is stopping. Kill its provider processes and interrupt

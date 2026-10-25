@@ -54,6 +54,7 @@ class Jobs:
         self._tick_lock = asyncio.Lock()
         self._kick_task = None
         self._kick_again = False
+        self._closed = False
 
     async def enqueue(self, run, args, *, reply='wait'):
         if set(args) - {'agent_id', 'brief', 'mode', 'done_when', 'rework'}:
@@ -318,7 +319,7 @@ class Jobs:
 
     def kick(self):
         """Run a scheduler pass soon, outside whatever called this."""
-        if self.rt._closing:
+        if self.rt._closing or self._closed:
             return
         if self._kick_task is not None and not self._kick_task.done():
             self._kick_again = True
@@ -332,13 +333,24 @@ class Jobs:
                 await self.tick()
             except Exception:  # noqa: BLE001
                 logger.exception('team job pass failed')
-            if not self._kick_again:
+            if not self._kick_again or self._closed or self.rt._closing:
                 return
 
+    def reopen(self):
+        self._closed = False
+
     async def close(self):
+        self._closed = True
         task = self._kick_task
         if task is not None and not task.done():
-            task.cancel()
+            # Let the current transaction finish before cancelling the pass.
+            # Cancelling an in-flight aiosqlite statement can leave its worker
+            # completing BEGIN after the task has already unwound, retaining
+            # a writer lock until that connection is eventually collected.
+            # No new pass is admitted once close starts.
+            done, _ = await asyncio.wait({task}, timeout=5.0)
+            if not done:
+                task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
     async def _holder(self, db, run, caller, turn, thread):

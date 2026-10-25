@@ -43,3 +43,22 @@ If the lead is busy, reports wait and are folded into one turn when it is free; 
 **Escalations** (setting `TEAM_ESCALATIONS`, off by default): a teammate can call `raise_escalation` to flag a gate only you can lift, and an approval left unanswered for ten minutes is flagged the same way. The lead is told in "Team escalations" and assigns nothing: it tells you what is asked and where to answer. Three flags an hour per thread, then muted.
 
 Not verified: a real Claude lead taking an incident and retrying; computers for notice turns (a lead whose computer is unavailable fails the report turn and you are notified).
+
+## Today brief
+
+The lead's existing Needs you card now appears as **Today**. It combines
+pending approvals and teammate questions, failed/missed/interrupted routines,
+automatic pauses, durable engine sign-in/limit failures, due incomplete tasks,
+and aggregated routine completions for the owner's local day. Each row names
+its source, shows its source timestamp and links to the conversation, routine
+history or task. Recorded engine failures persist across refreshes until a
+later settled turn on that provider supersedes them. Live engine probes remain
+separate from those recorded failures.
+
+Presence supplies the owner's IANA time zone; the existing once-a-minute tick
+updates one card per local day only when its content changes. It starts no AI
+turn, avoids an active conversation and suppresses empty first cards. Completion
+rows do not create notifications. Calendar and Gmail are explicitly unavailable;
+an unavailable connector is never reported as an empty day or inbox. New local
+question, task and completion queries each return at most 100 records; the
+compact card shows six rows and counts additional collected rows.

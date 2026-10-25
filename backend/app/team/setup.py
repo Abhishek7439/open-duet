@@ -185,6 +185,9 @@ def changes(before, after):
 
 
 async def undo_status(db, row):
+    if row.kind == 'routine':
+        from app.team import routine_changes
+        return await routine_changes.status(db, row)
     if row.kind != 'setup' or row.state != 'applied':
         return {'available': False, 'reason': 'This change is no longer undoable.'}
     team = await team_for(db, row.owner_id)
@@ -212,7 +215,7 @@ def replay(row):
 
 
 async def existing(db, owner, request_id):
-    return await db.scalar(select(TeamSetupRequest).where(TeamSetupRequest.owner_id == owner, TeamSetupRequest.request_id == request_id))
+    return await db.scalar(select(TeamSetupRequest).where(TeamSetupRequest.owner_id == owner, TeamSetupRequest.request_id == request_id).execution_options(populate_existing=True))
 
 
 async def propose(db, owner, caller_id, turn_id, thread_id, plan, *, check_engine, request_id=None, authorize=None, guided=False):
@@ -284,12 +287,21 @@ async def undo(db, owner, request_id):
     await begin_write(db)
     team = await team_for(db, owner, lock=True)
     row = await existing(db, owner, request_id)
-    if row is None or team is None or row.team_id != team.id or row.kind != 'setup':
+    if row is None or team is None or row.team_id != team.id or row.kind not in ('setup', 'routine'):
         await db.rollback()
         raise TeamError('request_not_found', 'No such team change to undo.')
     if row.state != 'applied':
+        code = 'already_undone' if row.state == 'undone' else 'not_undoable'
         await db.rollback()
-        raise TeamError('already_undone' if row.state == 'undone' else 'not_undoable', 'This change cannot be undone.')
+        raise TeamError(code, 'This change cannot be undone.')
+    if row.kind == 'routine':
+        from app.team import routine_changes
+        from app.services.routine_service import InvalidRoutine
+        try:
+            return await routine_changes.undo(db, owner, row, team)
+        except InvalidRoutine as exc:
+            await db.rollback()
+            raise TeamError('changed_since', f'The saved schedule cannot be restored: {exc}') from None
     created = []
     for entry in row.undo['created']:
         agent = await db.get(Agent, entry['agent_id'], with_for_update=True)

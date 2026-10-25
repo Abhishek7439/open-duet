@@ -20,7 +20,7 @@ Claude and Codex can mount the team tools. ACP and OpenAI-compatible adapters do
 | Find and close finished delegated conversations | `list_threads`, `close_thread`. Person-started conversations cannot be closed through this housekeeping path. |
 | Preview a schedule | `preview_schedule` validates timezone and schedule, returning upcoming dates without writing anything. |
 | Create recurring work | `create_routine` reuses the scheduler, requires approval and saves paused with Ask-first permissions. Profile creation does not activate a routine. |
-| Change or execute a routine | `list_routines`, `manage_routine`: revision-bound update, pause, resume, run now or delete, with approval. Resume/run now require explicit activation intent. Queued is not completed. Delete removes run history and has no Undo. |
+| Change or execute a routine | `list_routines`, `manage_routine`: revision-bound update, pause, resume, run now or delete, with approval. Resume/run now require explicit activation intent. Queued is not completed. Delete removes run history; Undo is available only within the limits below. |
 | Read or author reusable instructions | `skills_list` lists names/revisions; optional `name` reads a skill. `skill_manage` creates or updates the requested skill after approval, saving disabled for review in Agent settings. Text cannot grant permissions. |
 | Delete a teammate | Existing `propose_bot_deletion` remains a separate owner-approved operation. The current lead and busy agents are protected. |
 | Search previous conversations | Existing read-only memory/session search tools. |
@@ -35,6 +35,17 @@ Applied profile/setup cards show changed fields, Open/Edit actions and server-ch
 
 Routine creation and its receipt commit together. Skill files use the existing atomic filesystem writer; filesystem changes and database receipts are not one atomic transaction. If receipt persistence fails after a skill write, list skills and compare its revision before attempting another change. There is no combined Undo across profiles, skills, routines, connections and computers.
 
+Routine create/update/pause/resume/delete now produces a dedicated result card
+with the actual paused/active state, a link to its history, and owner-only,
+server-checked Undo. Repeated receipt events fold into one card. Undo refuses
+later settings changes, new runs, a run already active when the change was
+made, changed team/agent scope, or secret-looking saved settings. Concurrent
+Undo requests admit one change. Restored settings stay paused; resume requires
+separate intent and approval. Undo never replays executions. Creation Undo
+removes an unused routine. A deletion with no history may restore a new paused
+Ask-first definition, with a new identity and no webhook grant; deleted run
+history cannot be restored. Run-now has no Undo.
+
 Plan mode, unattended origins and chat-only paired-device sessions cannot use configuration tools to bypass their restrictions. Restricted origin is carried into delegated work and room messages. Membership and current lead authority are checked on the server.
 
 ## Remaining gaps
@@ -45,7 +56,7 @@ This is source implementation, not a claim of full parity or installer availabil
 - Chat-based computer allocation/selection, shared-computer administration and arbitrary MCP-server installation. Existing approved computer execution remains separate.
 - Room reconfiguration through chat, general start-thread/attachment management, voice notes and voice preferences.
 - Shared team-memory editing and a reusable team/role library.
-- Dedicated applied-result cards and Undo for routine/skill changes; use the existing Routines and Skills editors to inspect saved values.
+- Dedicated applied-result cards and Undo for skill changes; use the existing Skills editor to inspect saved values.
 - Real-Claude verification while signed out, PostgreSQL concurrency verification and packaged desktop release verification.
 
 Deterministic verification covers setup receipts, origin/approval restrictions, current-turn validation, profile corrections, routines, Codex MCP transport and compatible computer turns. `scripts/smoke-agent-setup.py` launches a fresh server/database and Chrome to check role creation/settings, coordination selection, demotion/promotion, the unsent starter and phone layout. Build `frontend/out` first; the test never uses the person's live agents.
