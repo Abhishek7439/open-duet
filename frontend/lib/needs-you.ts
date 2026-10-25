@@ -1,9 +1,13 @@
 export type NeedsYouRow = {
-  kind: "signed_out" | "out_of_credit" | "usage_limit" | "approval" | "routine" | "repeated_failure";
+  kind: "signed_out" | "out_of_credit" | "usage_limit" | "approval" | "routine" | "repeated_failure" | "question" | "due" | "routine_completed";
   key: string;
   title: string;
   detail: string | null;
   thread_id: number | null;
+  at?: string | null;
+  source?: string;
+  routine_id?: number | null;
+  work_item_id?: number | null;
 };
 
 // What the one action on a row says. Every kind has exactly one next step.
@@ -14,11 +18,17 @@ const ACTIONS: Record<NeedsYouRow["kind"], string> = {
   approval: "Review",
   routine: "Open the run",
   repeated_failure: "Look into it",
+  question: "Answer",
+  due: "Review task",
+  routine_completed: "View runs",
 };
 
 export function rowAction(row: NeedsYouRow): { label: string; href: string | null } {
   const label = ACTIONS[row.kind] ?? "Open";
   if (row.thread_id !== null) return { label, href: `/chat?thread=${row.thread_id}` };
+  if (row.routine_id) return { label, href: `/chat?view=routines&routine=${row.routine_id}` };
+  if (row.work_item_id) return { label, href: `/chat?view=planner&task=${row.work_item_id}` };
+  if (row.kind === "usage_limit") return { label, href: "/chat?panel=usage" };
   if (row.kind === "signed_out" || row.kind === "out_of_credit") return { label, href: "/settings/" };
   return { label, href: null };
 }

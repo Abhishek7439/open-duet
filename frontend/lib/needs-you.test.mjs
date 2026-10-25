@@ -37,7 +37,7 @@ test('rows drop what is not a row and each kind has one action', () => {
   assert.equal(state.items[0].rows.length, 1);
   assert.deepEqual(rowAction(row('x', 'approval', 9)), { label: 'Review', href: '/chat?thread=9' });
   assert.deepEqual(rowAction(row('x', 'signed_out')), { label: 'Open settings', href: '/settings/' });
-  assert.equal(rowAction(row('x', 'usage_limit')).href, null);
+  assert.equal(rowAction(row('x', 'usage_limit')).href, '/chat?panel=usage');
 });
 
 test('the summary counts the hidden rows too', () => {

@@ -295,7 +295,7 @@ async def test_routes_read_and_presence(sessions, rt, owner, lead):
     app.dependency_overrides[route.get_runtime] = lambda: rt
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
         read = await client.get("/needs-you")
-        assert read.status_code == 200 and read.json()["items"] == [] and read.json()["title"] == "Needs you"
+        assert read.status_code == 200 and read.json()["items"] == [] and read.json()["title"] == "Today"
         bad = await client.post("/needs-you/presence", json={"time_zone": "Mars/Base"})
         assert bad.status_code == 422
         ok = await client.post("/needs-you/presence", json={"time_zone": "Europe/Paris"})

@@ -20,9 +20,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
-from app.db.models import Approval, NeedsYouState, Routine, RoutineRun, Team, Thread, Turn
+from app.db.models import (AgentJob, Approval, NeedsYouState, Routine, RoutineRun,
+                           Team, Thread, Turn, WorkColumn, WorkItem)
 from app.db.transactions import begin_write
 from app.services import notification_feed, sentinel
 from app.services import thread_store as store
@@ -43,10 +44,13 @@ KIND_ORDER = {
     "out_of_credit": 1,
     "usage_limit": 2,
     "approval": 3,
-    "routine": 4,
-    "repeated_failure": 5,
+    "question": 4,
+    "routine": 5,
+    "due": 6,
+    "repeated_failure": 7,
+    "routine_completed": 8,
 }
-_BAD_RUN_STATES = frozenset({"failed", "missed"})
+_BAD_RUN_STATES = frozenset({"failed", "missed", "interrupted"})
 _SETTLED_RUN_STATES = frozenset({"completed", "failed", "missed", "interrupted"})
 
 
@@ -58,10 +62,17 @@ class Item:
     detail: str | None
     thread_id: int | None
     at: datetime
+    routine_id: int | None = None
+    work_item_id: int | None = None
+    source: str | None = None
 
     def public(self) -> dict:
         return {"kind": self.kind, "key": self.key, "title": self.title,
-                "detail": self.detail, "thread_id": self.thread_id}
+                "detail": self.detail, "thread_id": self.thread_id,
+                "at": _aware(self.at).isoformat() if self.kind not in {"signed_out", "out_of_credit", "usage_limit"} or self.thread_id else None,
+                "routine_id": self.routine_id, "work_item_id": self.work_item_id,
+                "source": self.source or ("Routine runs" if self.kind.startswith("routine") else
+                    "Approvals" if self.kind == "approval" else "Health scan" if self.kind == "repeated_failure" else "Engine status")}
 
 
 def utcnow() -> datetime:
@@ -151,14 +162,14 @@ async def collect(db, owner_id: str, *, now: datetime, engines: list[dict],
             latest[run.routine_id] = run
     for routine_id, run in latest.items():
         if run.state in _BAD_RUN_STATES:
-            what = "missed its time" if run.state == "missed" else "failed"
+            what = "missed its time" if run.state == "missed" else "was interrupted" if run.state == "interrupted" else "failed"
             items.append(Item("routine", f"routine:{routine_id}", f"{routines[routine_id].name} {what}",
                               _clip(run.error, 160) or None, run.thread_id,
-                              _aware(run.finished_at or run.created_at)))
+                              _aware(run.finished_at or run.created_at), routine_id=routine_id))
     for routine in routines.values():
         if routine.paused and routine.paused_reason:
             items.append(Item("routine", f"routine_paused:{routine.id}", f"{routine.name} is paused",
-                              _clip(routine.paused_reason, 160), None, now))
+                              _clip(routine.paused_reason, 160), None, _aware(routine.updated_at), routine_id=routine.id))
 
     repeated = [i for i in issues if i.get("count", 0) >= sentinel.RETRY_LOOP_MIN
                 or i.get("kind") == "repeated_denial"]
@@ -172,14 +183,95 @@ async def collect(db, owner_id: str, *, now: datetime, engines: list[dict],
     return items
 
 
+async def collect_local(db, owner_id: str, *, now: datetime, zone: ZoneInfo,
+                        attention: list[Item]) -> list[Item]:
+    """Durable local sources for the same card. No provider calls or AI work.
+
+    Completion rows aggregate by routine/day; every source has a stable key.
+    Source queries are capped, and the card reports only the rows actually read.
+    A failed routine is shown once in attention, not again as a completion.
+    """
+    items = list(attention)
+    since = now - WINDOW
+    midnight = _aware(now).astimezone(zone).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+    questions = (await db.execute(select(AgentJob, Thread.id)
+        .join(Thread, Thread.id == func.coalesce(AgentJob.assignee_thread_id, AgentJob.requester_thread_id))
+        .where(AgentJob.owner_id == owner_id, Thread.owner_id == owner_id,
+               AgentJob.status == "needs_input", AgentJob.question.is_not(None))
+        .order_by(AgentJob.id.desc()).limit(100))).all()
+    for job, thread_id in questions:
+        # Blocking consultations are answered through the requester; async jobs
+        # accept the person's answer in their own conversation.
+        target = job.requester_thread_id if job.reply == "wait" else thread_id
+        thread = await db.get(Thread, target)
+        if thread is None or thread.owner_id != owner_id:
+            continue
+        items.append(Item("question", f"question:{job.id}", _clip(job.question, 120),
+                          "A teammate is waiting for your answer.", target,
+                          _aware(job.last_activity_at or job.created_at), source="Team work"))
+
+    due = (await db.execute(select(WorkItem).join(WorkColumn).where(
+        WorkItem.owner_id == owner_id, WorkItem.archived.is_(False), WorkColumn.key != "done",
+        or_(WorkItem.due_at <= now, WorkItem.due_date <= (_aware(now) + timedelta(days=1)).date()))
+        .order_by(WorkItem.id).limit(100))).scalars()
+    for task in due:
+        if task.due_at:
+            if _aware(task.due_at) > now:
+                continue
+            deadline = _aware(task.due_at).astimezone(zone).strftime("%d %b, %H:%M")
+        elif task.due_date and task.due_date <= _aware(now).astimezone(zone_of(task.timezone)).date():
+            deadline = f"{task.due_date.isoformat()} ({task.timezone})"
+        else:
+            continue
+        items.append(Item("due", f"due:{task.id}", _clip(f"Task due: {task.title}", 120),
+                          f"Due {deadline}. Review the task; this reminder starts no work.",
+                          None, _aware(task.updated_at), work_item_id=task.id, source="Tasks & calendar"))
+
+    # Keep the last recorded engine failure after restart. A later successful
+    # turn on this provider proves it settled; do not infer success from an
+    # absent in-memory limit. Raw error text stays in its source conversation.
+    ranked = select(Turn.id.label("id"), func.row_number().over(
+        partition_by=Thread.provider, order_by=(Turn.finished_at.desc(), Turn.id.desc())).label("rank"))\
+        .join(Thread, Thread.id == Turn.thread_id).where(Thread.owner_id == owner_id,
+            Turn.status.in_(["succeeded", "failed"]), Turn.finished_at >= since).subquery()
+    failures = (await db.execute(select(Turn, Thread.provider).join(ranked, ranked.c.id == Turn.id)
+        .join(Thread, Thread.id == Turn.thread_id).where(ranked.c.rank == 1, Turn.status == "failed",
+            Turn.error_code.in_(["engine_limited", "engine_signed_out"])))).all()
+    for turn, provider in failures:
+        if any(i.key in {f"signed_out:{provider}", f"limit:{provider}", f"credit:{provider}"} for i in items):
+            continue
+        kind = "signed_out" if turn.error_code == "engine_signed_out" else "usage_limit"
+        items.append(Item(kind, f"engine_failure:{provider}:{turn.id}",
+                          f"{provider}: last run needed attention", "Review the recorded engine problem and try again.",
+                          turn.thread_id, _aware(turn.finished_at), source="Recorded engine failure"))
+
+    blocked = {i.routine_id for i in items if i.kind == "routine"}
+    results = (await db.execute(select(Routine.id, Routine.name, func.count(RoutineRun.id),
+        func.max(RoutineRun.finished_at)).join(RoutineRun, RoutineRun.routine_id == Routine.id)
+        .where(Routine.owner_id == owner_id, RoutineRun.state == "completed",
+               RoutineRun.finished_at >= midnight, RoutineRun.finished_at <= now)
+        .group_by(Routine.id, Routine.name).order_by(func.max(RoutineRun.finished_at).desc(), Routine.id)
+        .limit(100))).all()
+    for routine_id, name, count, finished in results:
+        if routine_id not in blocked:
+            items.append(Item("routine_completed", f"completed:{routine_id}:{local_day(now, zone)}",
+                _clip(f"{name}: {count} completed today", 120), "View the routine's run history.",
+                None, _aware(finished), routine_id=routine_id, source="Routine runs"))
+    items.sort(key=lambda i: (KIND_ORDER[i.kind], -i.at.timestamp(), i.key))
+    return items
+
+
 def build_card(items: list[Item], *, day: str, now: datetime, zone: ZoneInfo) -> dict:
     local = _aware(now).astimezone(zone)
     shown = items[:CARD_ROWS]
     return {
         "card_id": f"needs-you:{day}",
         "day": day,
-        "title": "Needs you",
+        "title": "Today",
         "subtitle": f"{local:%A}, {local.day} {local:%B}",
+        "time_zone": zone.key,
+        "checked_at": _aware(now).isoformat(),
+        "sources": {"local": "available", "calendar": "unavailable", "gmail": "unavailable"},
         "items": [i.public() for i in shown],
         "more": max(0, len(items) - len(shown)),
         "empty_text": EMPTY_TEXT,
@@ -187,7 +279,10 @@ def build_card(items: list[Item], *, day: str, now: datetime, zone: ZoneInfo) ->
 
 
 def card_hash(card: dict) -> str:
-    return hashlib.sha256(json.dumps(card, sort_keys=True).encode()).hexdigest()
+    # A periodic check alone is not new content. Persist its timestamp when a
+    # changed card is written, so the transcript says when it was last built.
+    content = {key: value for key, value in card.items() if key not in {"checked_at", "revision"}}
+    return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
 
 
 # --- the card's life ---------------------------------------------------------------
@@ -236,6 +331,7 @@ class NeedsYou:
             zone = zone_of(state.time_zone if state else None)
             items = await collect(db, self.owner_id, now=now, engines=await self._engine_entries(),
                                   issues=await self._issue_entries(now))
+            items = await collect_local(db, self.owner_id, now=now, zone=zone, attention=items)
         return build_card(items, day=local_day(now, zone), now=now, zone=zone)
 
     async def presence(self, time_zone: str) -> dict:
@@ -312,6 +408,7 @@ class NeedsYou:
         async with self.runtime.session() as db:
             items = await collect(db, self.owner_id, now=now, engines=await self._engine_entries(),
                                   issues=await self._issue_entries(now))
+            items = await collect_local(db, self.owner_id, now=now, zone=zone, attention=items)
         card = build_card(items, day=day, now=now, zone=zone)
         has_card = state is not None and state.card_day == day and state.card_thread_id is not None
         if not has_card and not items:
@@ -327,7 +424,7 @@ class NeedsYou:
                 thread_id = await self._home(db, state, lead_id)
             if thread_id is None:
                 await db.rollback()
-                thread = await self.runtime.create_thread(agent_id=lead_id, title="Needs you")
+                thread = await self.runtime.create_thread(agent_id=lead_id, title="Today")
                 thread_id = thread.id
                 await begin_write(db)
                 state = await self._state(db)
@@ -342,13 +439,13 @@ class NeedsYou:
             card["revision"] = (state.card_revision + 1) if state.card_day == day else 1
             await store._add_event(db, thread_id, CARD_EVENT, card, None)
             seen = set(state.notified or [])
-            fresh = [i for i in items if i.key not in seen]
+            fresh = [i for i in items if i.key not in seen and i.kind != "routine_completed"]
             if fresh:
-                kinds = len(items)
+                kinds = sum(i.kind != "routine_completed" for i in items)
                 notification_feed.add(
                     db, owner_id=self.owner_id, kind="needs_you",
                     title=f"{kinds} thing{'s' if kinds != 1 else ''} need{'' if kinds != 1 else 's'} you",
-                    body="\n".join(i.title for i in items[:CARD_ROWS]), thread_id=thread_id)
+                    body="\n".join(i.title for i in items if i.kind != "routine_completed")[:1000], thread_id=thread_id)
             state.notified = ([*state.notified, *(i.key for i in fresh)])[-NOTIFIED_KEPT:]
             state.card_day, state.card_thread_id, state.card_hash = day, thread_id, digest
             state.card_revision = card["revision"]

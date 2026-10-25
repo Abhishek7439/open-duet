@@ -6,7 +6,7 @@ import type { TranscriptItem } from "@/lib/transcript";
 // revision replaces the older one (the transcript keeps only the latest).
 export function NeedsYouCard({ item }: { item: Extract<TranscriptItem, { kind: "needs_you" }> }) {
   return (
-    <section aria-label="Needs you" className="space-y-2 rounded-field border border-line p-3 text-sm">
+    <section aria-label={item.title} className="space-y-2 rounded-field border border-line p-3 text-sm">
       <header className="flex items-baseline justify-between gap-2">
         <h2 className="font-semibold">{item.title}</h2>
         <span className="text-xs text-muted">{item.subtitle}</span>
@@ -24,6 +24,7 @@ export function NeedsYouCard({ item }: { item: Extract<TranscriptItem, { kind: "
                   <div className="min-w-0">
                     <p className="break-words">{row.title}</p>
                     {row.detail && <p className="break-words text-xs text-muted">{row.detail}</p>}
+                    {row.source && <p className="text-xs text-muted">{row.source}{row.at && <> · <time dateTime={row.at}>{new Date(row.at).toLocaleString(undefined, { timeZone: item.timeZone || "UTC" })}</time></>}</p>}
                   </div>
                   {action.href && (
                     <Link href={action.href} className="shrink-0 text-xs underline">
@@ -37,6 +38,8 @@ export function NeedsYouCard({ item }: { item: Extract<TranscriptItem, { kind: "
           {item.more > 0 && <p className="text-xs text-muted">and {item.more} more</p>}
         </>
       )}
+      {item.checkedAt && <p className="text-xs text-muted">Updated <time dateTime={item.checkedAt}>{new Date(item.checkedAt).toLocaleString(undefined, { timeZone: item.timeZone || "UTC" })}</time>{item.timeZone && ` (${item.timeZone})`}</p>}
+      {(item.sources?.calendar === "unavailable" || item.sources?.gmail === "unavailable") && <p className="text-xs text-muted">Calendar and Gmail are unavailable. This brief uses local records.</p>}
     </section>
   );
 }

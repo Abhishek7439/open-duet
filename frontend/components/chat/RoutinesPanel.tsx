@@ -232,13 +232,16 @@ function RunHistory({ routine, onClose, onOpen }: { routine: Routine; onClose: (
   );
 }
 
-export function RoutinesPanel({ agents, onClose }: { agents: Agent[]; onClose: () => void }) {
+export function RoutinesPanel({ agents, onClose, routineId = null }: { agents: Agent[]; onClose: () => void; routineId?: number | null }) {
   const [routines, setRoutines] = useState<Routine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [validPreviewKey, setValidPreviewKey] = useState<string | null>(null);
-  const [history, setHistory] = useState<Routine | null>(null);
+  const [chosenHistory, chooseHistory] = useState<Routine | null>(null);
+  const [requestedHistoryId, requestHistory] = useState(routineId);
+  const history = chosenHistory ?? routines?.find(routine => routine.id === requestedHistoryId) ?? null;
+  const setHistory = (next: Routine | null) => { requestHistory(null); chooseHistory(next); };
   const [secret, setSecret] = useState<{ routineId: number; secret: string; url: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const live = activeAgents(agents);

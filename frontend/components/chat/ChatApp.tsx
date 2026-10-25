@@ -156,13 +156,17 @@ export function ChatApp() {
   const [deleteAgentTarget, setDeleteAgentTarget] = useState<Agent | null>(null);
   // The Agents panel opened from New agent starts on the form.
   const [agentsCreate, setAgentsCreate] = useState(false);
-  const [routinesOpen, setRoutinesOpen] = useState(false);
-  useEffect(() => {
-    const open = () => setRoutinesOpen(true);
-    window.addEventListener("open-dots:open-routines", open);
-    return () => window.removeEventListener("open-dots:open-routines", open);
-  }, []);
-  const [plannerOpen, setPlannerOpen] = useState(false);
+  const [routinesShown, showRoutines] = useState(false);
+  const [plannerShown, showPlanner] = useState(false);
+  const routinesOpen = routinesShown || params.get("view") === "routines";
+  const plannerOpen = plannerShown || params.get("view") === "planner";
+  const clearBriefTarget = () => {
+    const query = new URLSearchParams(params.toString());
+    query.delete("view"); query.delete("routine"); query.delete("task");
+    router.replace(`/chat?${query.toString()}`);
+  };
+  const setRoutinesOpen = (open: boolean) => { showRoutines(open); if (!open && params.get("view") === "routines") clearBriefTarget(); };
+  const setPlannerOpen = (open: boolean) => { showPlanner(open); if (!open && params.get("view") === "planner") clearBriefTarget(); };
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   // Files chosen for the next message, and why one was refused.
@@ -763,9 +767,9 @@ export function ChatApp() {
       {teamOpen && agents !== null && <TeamPanel agents={agents} onClose={() => setTeamOpen(false)} onChanged={() => setAgentTick(value => value + 1)} />}
       {roomId !== null && agents !== null && <RoomView key={roomId} roomId={roomId} agents={agents} onClose={() => router.push("/chat")} onSelect={id => router.replace(roomHref(id))} />}
       {routinesOpen && agents !== null && (
-        <RoutinesPanel agents={agents} onClose={() => setRoutinesOpen(false)} />
+        <RoutinesPanel key={params.get("routine")} routineId={parseThreadId(params.get("routine"))} agents={agents} onClose={() => setRoutinesOpen(false)} />
       )}
-      {plannerOpen && agents !== null && <PlannerPanel agents={agents} threads={threads ?? []} onClose={() => setPlannerOpen(false)} onOpenRoutines={() => { setPlannerOpen(false); setRoutinesOpen(true); }} />}
+      {plannerOpen && agents !== null && <PlannerPanel key={params.get("task")} taskId={parseThreadId(params.get("task"))} agents={agents} threads={threads ?? []} onClose={() => setPlannerOpen(false)} onOpenRoutines={() => { setPlannerOpen(false); setRoutinesOpen(true); }} />}
       {agentsOpen && agents !== null && (
         <AgentsPanel
           agents={agents}
