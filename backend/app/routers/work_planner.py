@@ -5,14 +5,45 @@ from fastapi import APIRouter, Depends
 from pydantic import AwareDatetime
 from sqlalchemy import func, select
 
-from app.db.models import Routine, RoutineRun, WorkColumn, WorkItem
+from app.db.models import Routine, RoutineRun, WorkColumn, WorkItem, WorkItemRun
 from app.routers.threads import get_runtime
 from app.schemas.work_item import BoardResponse, ColumnResponse, WorkCreate, WorkResponse, WorkUpdate
 from app.services import routine_schedule, work_planner as service
 from app.services.local_access_policy import require_local_access
+from app.schemas.work_item import WorkRunCreate, WorkRunResponse, WorkEventResponse
+from app.db.models import WorkItemEvent
+from app.services import work_execution
+from app.services.routine_service import get_scheduler
 
 router = APIRouter(prefix="/planner", tags=["Planner"], dependencies=[Depends(require_local_access)])
 MAX_PROJECTED_EVENTS = 5000
+
+
+@router.get("/items/{item_id}/events", response_model=list[WorkEventResponse])
+async def task_events(item_id: int, rt=Depends(get_runtime)):
+    async with rt.session() as db:
+        await work_execution.owned_item(db, rt.owner_id, item_id)
+        return (await db.scalars(select(WorkItemEvent).where(WorkItemEvent.work_item_id == item_id)
+            .order_by(WorkItemEvent.id.desc()).limit(500))).all()
+
+
+@router.get("/items/{item_id}/runs", response_model=list[WorkRunResponse])
+async def task_runs(item_id: int, rt=Depends(get_runtime)):
+    async with rt.session() as db:
+        return await work_execution.list_runs(db, rt.owner_id, item_id)
+
+
+@router.post("/items/{item_id}/runs", response_model=WorkRunResponse, status_code=201)
+async def start_task(item_id: int, payload: WorkRunCreate, rt=Depends(get_runtime), sch=Depends(get_scheduler)):
+    async with rt.session() as db:
+        receipt = await work_execution.start(db, rt.owner_id, item_id, payload)
+    sch.kick()
+    return receipt
+
+
+@router.post("/items/{item_id}/runs/{receipt_id}/cancel", response_model=WorkRunResponse)
+async def cancel_task(item_id: int, receipt_id: int, rt=Depends(get_runtime), sch=Depends(get_scheduler)):
+    return await work_execution.cancel(sch, rt.owner_id, item_id, receipt_id)
 
 
 @router.get("/board", response_model=BoardResponse)
@@ -29,9 +60,10 @@ async def board(rt=Depends(get_runtime)):
 async def items(board_id: int, archived: bool = False, rt=Depends(get_runtime)):
     async with rt.session() as db:
         await service.owned_board(db, rt.owner_id, board_id)
-        return (await db.scalars(select(WorkItem).where(
+        records = (await db.scalars(select(WorkItem).where(
             WorkItem.owner_id == rt.owner_id, WorkItem.board_id == board_id, WorkItem.archived == archived
         ).order_by(WorkItem.position, WorkItem.id))).all()
+        return await work_execution.with_status(db, rt.owner_id, records)
 
 
 @router.post("/items", response_model=WorkResponse, status_code=201)
@@ -49,14 +81,15 @@ async def item(item_id: int, rt=Depends(get_runtime)):
             WorkItem.id == item_id, WorkItem.owner_id == rt.owner_id))
         if record is None:
             raise service.error(404, "Task not found")
-        return record
+        return (await work_execution.with_status(db, rt.owner_id, [record]))[0]
 
 
 @router.patch("/items/{item_id}", response_model=WorkResponse)
 async def update_item(item_id: int, payload: WorkUpdate, rt=Depends(get_runtime)):
     changes = payload.model_dump(exclude_unset=True, exclude={"revision"})
     async with rt.session() as db:
-        return await service.update_item(db, rt.owner_id, item_id, payload.revision, changes)
+        saved = await service.update_item(db, rt.owner_id, item_id, payload.revision, changes)
+        return (await work_execution.with_status(db, rt.owner_id, [saved]))[0]
 
 
 @router.get("/routine-calendar")
@@ -104,4 +137,8 @@ async def routine_calendar(start: AwareDatetime, end: AwareDatetime, rt=Depends(
         for run, name in runs[:2000]:
             events.append(dict(id=f"run-{run.id}", kind="run", routine_id=run.routine_id, title=name,
                                at=run.scheduled_for or run.created_at, state=run.state, thread_id=run.thread_id))
+        task_links = dict((await db.execute(select(WorkItemRun.routine_id, WorkItemRun.work_item_id)
+            .where(WorkItemRun.owner_id == rt.owner_id))).all())
+        for event in events:
+            event["work_item_id"] = task_links.get(event["routine_id"])
     return {"events": sorted(events, key=lambda e: e["at"]), "warnings": warnings}

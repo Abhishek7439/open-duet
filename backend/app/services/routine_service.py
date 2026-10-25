@@ -18,7 +18,7 @@ import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, exists, or_, select, update
+from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,10 +28,13 @@ from app.db.models.agent import Agent
 from app.db.models.approval import Approval
 from app.db.models.routine import ACTIVE_RUN_STATES, Routine, RoutineRun
 from app.db.models.turn import Turn
+from app.db.models.thread import Thread
+from app.db.models.work_item import WorkItemRun
 from app.db.transactions import begin_write
 from app.services import approval_modes, notification_feed
 from app.services import routine_schedule as schedules
 from app.services import thread_runtime as runtime_module
+from app.services import work_events, work_reminders
 
 logger = get_logger(__name__)
 
@@ -235,12 +238,17 @@ async def get_routine(db: AsyncSession, owner_id: str, routine_id: int) -> Routi
     routine = await db.get(Routine, routine_id)
     if routine is None or routine.owner_id != owner_id:
         raise RoutineNotFound(routine_id)
+    # Planner attempts are immutable receipts, controlled from the task. Do
+    # not let ordinary routine edits, deletion or Run now rewrite/replay one.
+    if await db.scalar(select(WorkItemRun.id).where(WorkItemRun.routine_id == routine_id)):
+        raise RoutineNotFound(routine_id)
     return routine
 
 
 async def list_routines(db: AsyncSession, owner_id: str) -> list[Routine]:
     result = await db.execute(
-        select(Routine).where(Routine.owner_id == owner_id).order_by(Routine.created_at, Routine.id)
+        select(Routine).where(Routine.owner_id == owner_id,
+            ~exists().where(WorkItemRun.routine_id == Routine.id)).order_by(Routine.created_at, Routine.id)
     )
     return list(result.scalars().all())
 
@@ -576,6 +584,7 @@ class RoutineScheduler:
 
     async def tick(self) -> None:
         async with self._lock:
+            await self._deliver(await work_reminders.remind_due(self.session, self.owner_id, self.clock()))
             await self._enqueue_due()
             await self._start_queued()
             await self._follow_active()
@@ -645,6 +654,8 @@ class RoutineScheduler:
                         f"Routine “{routine.name}” missed a run", f"Due {_local(run.scheduled_for, routine.timezone)}. {run.error}",
                     ))
                     changed.append(run.id)
+                if run.id in changed:
+                    await work_events.execution(db, run, run.state)
             await db.commit()
         if changed:
             logger.warning("routine runs settled at startup", run_ids=changed)
@@ -728,6 +739,7 @@ class RoutineScheduler:
                 await db.flush()
         except IntegrityError:
             return False  # this occurrence was already recorded
+        await work_events.execution(db, run, run.state)
         return True
 
     async def _enqueue_occurrence(self, db: AsyncSession, routine: Routine, now: datetime) -> list:
@@ -789,6 +801,12 @@ class RoutineScheduler:
 
     async def _start_queued(self) -> None:
         async with self.session() as db:
+            busy_threads = select(Thread.agent_id).join(Turn, Turn.thread_id == Thread.id).where(
+                Thread.owner_id == self.owner_id, Thread.agent_id.is_not(None), Turn.status == "running"
+            ).correlate(None)
+            busy_runs = select(Routine.agent_id).join(RoutineRun).where(
+                Routine.owner_id == self.owner_id, RoutineRun.state.in_(("running", "needs_input"))
+            ).correlate(None)
             ids = (
                 await db.execute(
                     select(RoutineRun.id)
@@ -796,6 +814,10 @@ class RoutineScheduler:
                     .where(
                         Routine.owner_id == self.owner_id,
                         RoutineRun.state == "queued",
+                        # Busy cards must not occupy the whole batch and
+                        # starve an available agent behind them in the queue.
+                        or_(~exists().where(WorkItemRun.routine_id == Routine.id), and_(
+                            Routine.agent_id.not_in(busy_threads), Routine.agent_id.not_in(busy_runs))),
                         # A retry waits for its delay (scheduled_for).
                         or_(RoutineRun.trigger != "retry", RoutineRun.scheduled_for <= self.clock()),
                     )
@@ -814,6 +836,25 @@ class RoutineScheduler:
         this point leaves an interrupted run, never a second start."""
         async with self.session() as db:
             await begin_write(db)
+            candidate = await db.get(RoutineRun, run_id)
+            if candidate is None:
+                return None
+            routine = await db.get(Routine, candidate.routine_id, with_for_update=True)
+            receipt = await db.scalar(select(WorkItemRun).where(WorkItemRun.routine_id == routine.id))
+            if receipt is not None:
+                if receipt.cancelled_at:
+                    return None
+                # An agent lock serializes claims across cards on PostgreSQL;
+                # SQLite already serializes writers. Keep a busy task queued.
+                await db.get(Agent, routine.agent_id, with_for_update=True)
+                busy_run = await db.scalar(select(RoutineRun.id).join(Routine).where(
+                    Routine.agent_id == routine.agent_id, Routine.owner_id == routine.owner_id,
+                    RoutineRun.id != run_id, RoutineRun.state.in_(("running", "needs_input"))).limit(1))
+                busy_turn = await db.scalar(select(Turn.id).join(Thread, Turn.thread_id == Thread.id).where(
+                    Thread.agent_id == routine.agent_id, Thread.owner_id == routine.owner_id,
+                    Turn.status == "running").limit(1))
+                if busy_run or busy_turn:
+                    return None
             claimed = await db.execute(
                 update(RoutineRun)
                 .where(RoutineRun.id == run_id, RoutineRun.state == "queued")
@@ -825,6 +866,7 @@ class RoutineScheduler:
                 return None
             run = await db.get(RoutineRun, run_id)
             routine = await db.get(Routine, run.routine_id)
+            await work_events.execution(db, run, "claimed")
             await db.commit()
             return run, routine
 
@@ -844,6 +886,7 @@ class RoutineScheduler:
             routine = await db.get(Routine, run.routine_id)
             self._close_wait(run, now)
             run.state, run.error, run.finished_at = "failed", _clip(error, ERROR_CHARS), now
+            await work_events.execution(db, run, "failed")
             if pause_reason is not None:
                 routine.paused, routine.paused_reason, routine.next_run_at = True, pause_reason, None
             body = run.error
@@ -885,6 +928,10 @@ class RoutineScheduler:
         async with self.session() as db:
             await begin_write(db)
             await db.execute(update(RoutineRun).where(RoutineRun.id == run_id).values(**values))
+            if "thread_id" in values or "turn_id" in values or "state" in values:
+                run = await db.get(RoutineRun, run_id)
+                kind = "thread_linked" if "thread_id" in values else "started" if "turn_id" in values else values["state"]
+                await work_events.execution(db, run, kind)
             await db.commit()
 
     async def _start(self, run_id: int) -> None:
@@ -999,6 +1046,7 @@ class RoutineScheduler:
             if run is None or run.state not in ("running", "needs_input"):
                 await db.rollback()
                 return
+            previous_state = run.state
             routine = await db.get(Routine, run.routine_id)
             if run.turn_id is None:
                 # Claimed, but no turn was recorded: the start did not finish
@@ -1037,6 +1085,8 @@ class RoutineScheduler:
                         staged.append(self._notify(db, routine, run, "routine_failed",
                                                    f"Routine “{routine.name}” failed", run.error))
                         stop_thread = run.thread_id
+            if run.state != previous_state:
+                await work_events.execution(db, run, run.state)
             await db.commit()
         if stop_thread is not None:
             try:

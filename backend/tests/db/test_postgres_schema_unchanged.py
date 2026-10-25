@@ -29,6 +29,7 @@ ROUTINE_TABLES = {"routine", "routine_run", "notification"}
 NEEDS_YOU_TABLES = {"needs_you_state"}
 NOTICE_TABLES = {"team_notice"}
 PLANNER_TABLES = {"work_board", "work_column", "work_item"}
+WORK_EXECUTION_TABLES = {"work_item_run", "work_item_event"}
 
 
 def postgres_ddl(table_names: set[str]) -> str:
@@ -60,7 +61,7 @@ def test_thread_tables_compile_to_their_reviewed_postgres_schema():
 
 
 def test_every_table_is_covered_by_one_of_the_snapshots():
-    assert original_tables() | F04_TABLES | SETTINGS_TABLES | AGENT_TABLES | COMPUTER_TABLES | AUTH_TABLES | ROUTINE_TABLES | TEAM_TABLES | ROOM_TABLES | NEEDS_YOU_TABLES | NOTICE_TABLES | PLANNER_TABLES == set(Base.metadata.tables)
+    assert original_tables() | F04_TABLES | SETTINGS_TABLES | AGENT_TABLES | COMPUTER_TABLES | AUTH_TABLES | ROUTINE_TABLES | TEAM_TABLES | ROOM_TABLES | NEEDS_YOU_TABLES | NOTICE_TABLES | PLANNER_TABLES | WORK_EXECUTION_TABLES == set(Base.metadata.tables)
     assert not original_tables() & F04_TABLES
 
 
@@ -102,3 +103,8 @@ def test_team_notice_table_compiles_to_its_reviewed_postgres_schema():
 
 def test_planner_tables_compile_to_their_reviewed_postgres_schema():
     assert postgres_ddl(PLANNER_TABLES) == snapshot_text(HERE / "postgres_schema_planner.sql")
+
+
+def test_work_execution_tables_compile_to_their_reviewed_postgres_schema():
+    normalized = "\n".join(line.rstrip() for line in postgres_ddl(WORK_EXECUTION_TABLES).splitlines()) + "\n"
+    assert normalized == snapshot_text(HERE / "postgres_schema_work_execution.sql")

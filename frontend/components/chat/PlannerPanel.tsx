@@ -6,6 +6,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Columns3, List, Plus, RefreshC
 import { Dialog } from "@/components/ui/Dialog";
 import { Button } from "@/components/ui/Button";
 import { WorkItemEditor } from "./WorkItemEditor";
+import { WorkExecutionPanel } from "./WorkExecutionPanel";
 import { ApiError, type Agent, type Thread } from "@/lib/api";
 import { collaboration } from "@/lib/collaboration";
 import { browserTimezone } from "@/lib/routines";
@@ -40,6 +41,7 @@ export function PlannerPanel({ agents, threads, onClose, onOpenRoutines }: {
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [executionItem, setExecutionItem] = useState<WorkItem | null>(null);
   const [conflictItem, setConflictItem] = useState<WorkItem | null>(null);
   const mutationVersion = useRef(0);
   const saving = useRef(false);
@@ -161,6 +163,8 @@ export function PlannerPanel({ agents, threads, onClose, onOpenRoutines }: {
         <span className={cn(item.priority === "urgent" ? "text-danger" : item.priority === "high" ? "text-warning" : "")}>{item.priority}</span>
         <span className={isOverdue(item) ? "text-danger" : ""}>{isOverdue(item) ? "Overdue · " : ""}{deadlineLabel(item)}</span>
       </div>
+      <button type="button" className="mt-2 text-xs text-accent hover:underline" onClick={() => setExecutionItem(item)}>Run & history</button>
+      {item.execution_state && <p className="mt-1 text-xs text-muted">Attempt {item.execution_attempt} · {item.execution_state === "needs_input" ? "Waiting for approval" : item.execution_state}</p>}
       {!compact && <>
         <p className="mt-2 truncate text-xs text-muted">{assigneeLabel(item)}</p>
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -175,7 +179,9 @@ export function PlannerPanel({ agents, threads, onClose, onOpenRoutines }: {
 
   const routineEntry = (event: CalendarEvent) => (
     <div key={event.id} className="rounded-field border border-accent/30 bg-accent/5 px-2 py-1 text-xs text-accent">
-      {event.thread_id ? <Link className="block truncate hover:underline" href={`/chat?thread=${event.thread_id}`} onClick={onClose}>↻ {event.title}</Link>
+      {event.work_item_id ? <button className="block w-full truncate text-left hover:underline" onClick={() => {
+        void planner.item(event.work_item_id!).then(setExecutionItem).catch(error => setError(errorMessage(error)));
+      }}>▶ {event.title}</button> : event.thread_id ? <Link className="block truncate hover:underline" href={`/chat?thread=${event.thread_id}`} onClick={onClose}>↻ {event.title}</Link>
         : <button className="block w-full truncate text-left hover:underline" onClick={onOpenRoutines}>↻ {event.title}</button>}
       <p className="text-muted">{new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {event.state}</p>
     </div>
@@ -267,6 +273,15 @@ export function PlannerPanel({ agents, threads, onClose, onOpenRoutines }: {
       </div>
     </Dialog>
     {editor && board && <WorkItemEditor key={editor.item?.id ?? "new"} item={editor.item} board={board} agents={agents} threads={threads} team={team}
+      onRun={item => { setEditor(null); setExecutionItem(item); }}
       seedDate={editor.seedDate} seedColumn={editor.seedColumn} latestItem={conflictItem && conflictItem.id === editor.item?.id ? conflictItem : items?.find(item => item.id === editor.item?.id)} onReload={item => { setEditor({ item }); setConflictItem(null); }} onSave={save} onOpenThread={onClose} onClose={() => { if (!busy) { setEditor(null); setConflictItem(null); } }} />}
+    {executionItem && <WorkExecutionPanel key={executionItem.id} item={executionItem} agents={agents} onOpenThread={onClose}
+      onClose={() => { setExecutionItem(null); setTick(value => value + 1); }} onReview={async () => {
+        const current = await planner.item(executionItem.id);
+        const review = board?.columns.find(column => column.key === "review");
+        if (!review) throw new Error("Review column is unavailable.");
+        const saved = await planner.update(current, { column_id: review.id });
+        setExecutionItem(saved); await refreshItems();
+      }} />}
   </>;
 }

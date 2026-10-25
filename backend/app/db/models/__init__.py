@@ -18,10 +18,10 @@ from app.db.models.routine import Routine, RoutineRun
 from app.db.models.notification import Notification
 from app.db.models.needs_you import NeedsYouState
 from app.db.models.auth import AuthSession, OwnerAccount, PairingCode
-from app.db.models.work_item import WorkBoard, WorkColumn, WorkItem
+from app.db.models.work_item import WorkBoard, WorkColumn, WorkItem, WorkItemRun, WorkItemEvent
 
 __all__ = [
-    "WorkBoard", "WorkColumn", "WorkItem",
+    "WorkBoard", "WorkColumn", "WorkItem", "WorkItemRun", "WorkItemEvent",
     "UserSandbox",
     "UserCredential",
     "Tasks",

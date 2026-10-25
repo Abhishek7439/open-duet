@@ -1,0 +1,61 @@
+const { chromium, expect } = require('../desktop/node_modules/@playwright/test');
+const fs = require('node:fs');
+const path = require('node:path');
+
+(async () => {
+  const [url, statePath, root] = process.argv.slice(2);
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  try {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
+    await context.addCookies(JSON.parse(fs.readFileSync(statePath)).cookies);
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`${url}/chat/`);
+    const later = page.getByRole('button', { name: 'Set up later' });
+    if (await later.isVisible()) await later.click();
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+    await page.evaluate(async () => {
+      const session = await fetch('/api/v1/auth/session').then(response => response.json());
+      const response = await fetch('/api/v1/agents', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-csrf-token': session.csrf_token }, body: JSON.stringify({ name: 'Planner worker', instructions: 'Complete the requested task.' }) });
+      if (!response.ok) throw new Error(await response.text());
+    });
+    await page.reload();
+    await page.getByRole('button', { name: 'Tasks & calendar', exact: true }).click();
+    const planner = page.getByRole('dialog', { name: 'Tasks & calendar', exact: true });
+    await planner.getByRole('button', { name: 'New task', exact: true }).click();
+    const editor = page.getByRole('dialog', { name: 'New task', exact: true });
+    await editor.getByLabel('Title', { exact: true }).fill('Planner execution smoke');
+    await editor.getByLabel('Description', { exact: true }).fill('Report a concise result for review.');
+    await editor.getByRole('button', { name: 'Create task', exact: true }).click();
+    await planner.getByRole('button', { name: 'Run & history', exact: true }).click();
+    const execution = page.getByRole('dialog', { name: 'Agent work · Planner execution smoke', exact: true });
+    await expect(execution.getByLabel('Exact task prompt')).toHaveValue(/Planner execution smoke/);
+    await expect(execution.getByText('No agent work has been requested.')).toBeVisible();
+    await execution.getByRole('button', { name: 'Confirm and start now', exact: true }).click();
+    await expect(execution.getByText('Attempt 1 · completed', { exact: true })).toBeVisible({ timeout: 30000 });
+    await expect(execution.getByRole('link', { name: 'Open execution conversation' })).toBeVisible();
+    await execution.getByRole('button', { name: 'Move to Review', exact: true }).click();
+    await execution.screenshot({ path: path.join(root, 'execution-desktop.png') });
+    await execution.getByRole('button', { name: 'Close', exact: true }).last().click();
+    await expect(planner.getByRole('region', { name: 'Review', exact: true }).getByText('Planner execution smoke', { exact: true })).toBeVisible();
+    await planner.getByRole('button', { name: 'Run & history', exact: true }).click();
+    const at = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const local = new Date(at.getTime() - at.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    await execution.getByLabel(/Run once at/).fill(local);
+    await execution.getByRole('button', { name: 'Confirm scheduled run', exact: true }).click();
+    await expect(execution.getByText('Attempt 2 · scheduled', { exact: true })).toBeVisible();
+    await execution.getByRole('button', { name: 'Close', exact: true }).last().click();
+    await planner.getByRole('button', { name: 'Month', exact: true }).click();
+    await planner.getByRole('button', { name: /▶ Task #.*Planner execution smoke/ }).last().click();
+    await expect(execution.getByText('Attempt 2 · scheduled', { exact: true })).toBeVisible();
+    await execution.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(execution.getByText('Attempt 2 · cancelled', { exact: true })).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(execution.getByRole('button', { name: 'Confirm and start now', exact: true })).toBeVisible();
+    await execution.screenshot({ path: path.join(root, 'execution-phone.png') });
+    await page.keyboard.press('Escape');
+    await expect(execution).toBeHidden();
+    expect(errors).toEqual([]);
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

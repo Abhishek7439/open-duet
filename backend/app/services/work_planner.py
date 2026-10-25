@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.db.models import Agent, Team, Thread, WorkBoard, WorkColumn, WorkItem
 from app.db.transactions import begin_write
 from app.schemas.work_item import WorkFields
+from app.services import work_events
 
 COLUMNS = [("backlog", "Backlog"), ("ready", "Ready"), ("doing", "In progress"),
            ("waiting", "Waiting"), ("review", "Review"), ("done", "Done")]
@@ -85,6 +86,8 @@ async def create_item(db, owner, data):
     item = WorkItem(**data, owner_id=owner, position=await next_position(db, data["board_id"], column.id),
                     completed_at=now if column.key == "done" else None)
     db.add(item)
+    await db.flush()
+    work_events.add(db, item, "created")
     await db.commit()
     await db.refresh(item)
     return item
@@ -117,6 +120,7 @@ async def update_item(db, owner, item_id, revision, changes):
     if result.rowcount != 1:
         await db.rollback()
         raise error(409, "This task changed in another window. Refresh it before saving again.")
+    work_events.add(db, item, "updated", detail=", ".join(sorted(changes)))
     await db.commit()
     await db.refresh(item)
     return item

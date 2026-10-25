@@ -41,7 +41,8 @@ does not include a model or a model subscription.
   browse or download workspace files, and review reported token use and cost.
 - **Plan tasks and deadlines.** Keep work on a board, assign an agent or team,
   and review deadlines alongside routine occurrences in a week or month
-  calendar. See [tasks and calendar](docs/TASKS.md).
+  calendar. Start an agent from a card, schedule a one-time run, and review
+  its conversation and attempt history. See [tasks and calendar](docs/TASKS.md).
 
 ## Example: prepare a weekly project briefing
 

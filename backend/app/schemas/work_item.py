@@ -68,6 +68,9 @@ class WorkResponse(WorkFields):
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    execution_state: str | None = None
+    execution_thread_id: int | None = None
+    execution_attempt: int | None = None
 
 
 class ColumnResponse(BaseModel):
@@ -82,3 +85,42 @@ class BoardResponse(BaseModel):
     id: int
     name: str
     columns: list[ColumnResponse]
+
+
+class WorkRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=16, max_length=128)
+    agent_id: int = Field(gt=0)
+    prompt: str = Field(min_length=1, max_length=20_000)
+    approval_mode: Literal["ask", "accept_edits", "plan"] = "ask"
+    scheduled_for: AwareDatetime | None = None
+
+
+class WorkRunResponse(BaseModel):
+    id: int
+    work_item_id: int
+    attempt: int
+    routine_id: int
+    run_id: int | None
+    agent_id: int
+    prompt: str
+    approval_mode: str
+    state: str
+    scheduled_for: datetime | None
+    thread_id: int | None
+    result: str | None
+    error: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+
+
+class WorkEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    receipt_id: int | None
+    kind: str
+    actor: str
+    detail: str | None
+    created_at: datetime

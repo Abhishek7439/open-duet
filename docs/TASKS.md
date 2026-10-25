@@ -36,6 +36,44 @@ saving change must be replaced with a valid time in the editor.
 Completed and archived tasks are not marked overdue. The upcoming list also
 helps review overdue work and tasks without deadlines.
 
+The scheduler sends one reminder per deadline for an unfinished, unarchived
+task: at a timed deadline, or on the chosen date in the task's timezone.
+Reminders appear in Notifications and use the existing optional Telegram copy.
+They are checked while the backend is running and catch up when it returns.
+
+## Start agent work
+
+Choose **Run & history** on a saved card in any planner view. Select an agent,
+review the exact task prompt and approval mode, and choose **Confirm and start
+now**. The stricter of the chosen mode and the agent's saved mode applies.
+Save task edits before opening this action from the editor.
+
+Leave the execution time empty to start now, or choose a future local date
+and time for **Confirm scheduled run**. This is separate from the deadline.
+One-time task execution uses the existing routine scheduler, catch-up window,
+approval timeout, and run limit; recurring work stays in Routines.
+
+Each request saves a durable attempt before dispatch. Repeated delivery of
+the same request returns that receipt. A task can have only one scheduled or
+active attempt; work stays queued while its agent is busy. The card and history
+show execution state independently of the workflow column. Each attempt links
+to a fresh execution conversation before its prompt is sent, where you can
+follow live output, answer approvals, and continue an interrupted conversation.
+
+Use **Cancel** for scheduled/queued work and **Stop** for running work. History,
+results, errors, timestamps, and task activity remain available. **Prepare
+retry** copies a previous attempt into the confirmation form; check its
+conversation for partial work before confirming a new attempt. Task attempts
+do not retry automatically. A restart marks started work interrupted and never
+silently replays it. Unclaimed queued work can still start after a restart.
+
+Successful execution offers **Move to Review**. A person decides whether to
+move the card to Done. Archiving a card preserves any requested execution;
+cancel that attempt separately if it should stop. Removing an agent makes its
+pending attempt fail visibly; removing a conversation keeps the run receipt.
+Task execution records are managed from their card and cannot be edited,
+deleted, or replayed through the ordinary routine controls.
+
 ## Routines on the calendar
 
 The optional routine overlay shows future schedule occurrences and recorded
@@ -60,8 +98,10 @@ Load the latest version, review it, and apply your change again.
 
 This release provides one default board. It does not connect to Google or
 Outlook calendars, import meetings, or synchronize provider events. It also
-does not start or schedule agent work from task cards or send deadline
-notifications. Use the existing Routines workflow for scheduled agent runs.
+supports explicit card execution and one-time scheduling with one selected
+agent. Team assignment remains planning metadata; choose an individual agent
+for execution. Automatic pickup on assignment, status changes, and deadlines
+is outside this workflow.
 
 A deadline or status change never starts an agent. Existing routine approval,
 retry, and run-limit behavior continues to apply to scheduled work.

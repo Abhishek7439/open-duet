@@ -37,17 +37,19 @@ export type WorkItemEditorProps = {
   latestItem?: WorkItem;
   onReload?: (item: WorkItem) => void;
   onOpenThread?: () => void;
+  onRun?: (item: WorkItem) => void;
   onSave: (data: WorkInput) => Promise<void>;
   onClose: () => void;
 };
 
-export function WorkItemEditor({ item, board, agents, threads, team, seedDate, seedColumn, latestItem, onReload, onOpenThread, onSave, onClose }: WorkItemEditorProps) {
+export function WorkItemEditor({ item, board, agents, threads, team, seedDate, seedColumn, latestItem, onReload, onOpenThread, onRun, onSave, onClose }: WorkItemEditorProps) {
   const id = useId();
   const [draft, setDraft] = useState(() => draftOf(item, board, seedDate, seedColumn));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timezone = browserTimezone();
   const stale = !!item && !!latestItem && latestItem.revision !== item.revision;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(draftOf(item, board, seedDate, seedColumn));
   const unavailableAgent = item?.agent_id && !agents.some(agent => agent.id === item.agent_id);
   const unavailableTeam = item?.team_id && team?.id !== item.team_id;
   const unavailableThread = item?.thread_id && !threads.some(thread => thread.id === item.thread_id);
@@ -139,7 +141,7 @@ export function WorkItemEditor({ item, board, agents, threads, team, seedDate, s
               <input id={`${id}-time`} type="datetime-local" required value={draft.time} onChange={event => change("time", event.target.value)} className={input} />
             </div>}
           </div>
-          <p className="text-xs text-muted">Deadlines and status changes do not start an agent. Use Routines to schedule agent work.</p>
+          <p className="text-xs text-muted">Deadlines and status changes do not start an agent. Save your changes, then use Run & history to start or schedule work.</p>
           <div>
             <label htmlFor={`${id}-assignee`} className="mb-1 block text-sm font-medium">Assigned to</label>
             <select id={`${id}-assignee`} value={draft.assignee} onChange={event => change("assignee", event.target.value)} className={input}>
@@ -165,6 +167,7 @@ export function WorkItemEditor({ item, board, agents, threads, team, seedDate, s
         </fieldset>
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2 border-t border-line pt-4">
+          {item && onRun && <Button disabled={busy || stale || dirty} onClick={() => onRun(item)}>Run & history</Button>}
           <Button disabled={busy} onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={busy} disabled={stale || !draft.title.trim()}>{item ? "Save changes" : "Create task"}</Button>
         </div>

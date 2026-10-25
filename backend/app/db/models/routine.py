@@ -10,7 +10,7 @@ from app.db.types import BigIntPK, JSONValue, UTCDateTime
 # Checked in the service, not the database, so adding one never needs a table
 # rebuild on SQLite.
 ROUTINE_RUN_STATES = (
-    "queued", "running", "needs_input", "completed", "failed", "missed", "skipped", "interrupted",
+    "queued", "running", "needs_input", "completed", "failed", "missed", "skipped", "interrupted", "cancelled",
 )
 ACTIVE_RUN_STATES = ("queued", "running", "needs_input")
 # "retry" is a new attempt of a failed run (Routine.retry_limit).
