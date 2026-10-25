@@ -34,13 +34,11 @@ filtering alone does not isolate a turn from the server's files or network.
 
 ### P1 — Make memory writes truthful and durable on every supported engine
 
-A current-source Codex run with no helper could recall a fact from earlier
-conversation history but could not write it to private agent memory; the reply
-still implied that it had saved the fact. Make explicit “remember this” requests
-write a private, journaled note when supported, or clearly say when persistence
-is unavailable. Show note provenance in a fresh conversation, support
-correction and undo, and never move personal facts into team memory without
-explicit choice. See [memory](MEMORY.md).
+Standalone literal `Remember that <one fact>` requests now write a private,
+journaled note before the engine answers, including Codex with no helper.
+Provenance, simple first-person corrections, secret refusal and truthful
+write/Undo receipts have automated coverage. Complex conversational corrections
+and live-provider/packaged qualification remain open. See [memory](MEMORY.md).
 
 ### P1 — Qualify guided agent setup by chatting
 
@@ -64,9 +62,10 @@ report an unavailable provider as an empty inbox or calendar.
 
 Routines already have a UI, schedule preview, run history, webhooks, approvals,
 retry controls and chat management tools. Keep newly proposed routines disabled
-until review. Complete durable webhook delivery receipts, then applied-result
-cards and safe Undo. Connected-app event triggers need separate grants,
-provenance and bounded retries.
+until review. Durable webhook delivery receipts now deduplicate retries when
+the sender supplies an `Idempotency-Key`; qualify PostgreSQL concurrency, then
+add applied-result cards and safe Undo. Connected-app event triggers need
+separate grants, provenance and bounded retries.
 
 ### P1 — Finish room management and routing
 

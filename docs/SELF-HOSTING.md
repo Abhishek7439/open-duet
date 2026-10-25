@@ -313,7 +313,8 @@ See [ROADMAP.md](ROADMAP.md) for what is next.
 `TURN_SANDBOX_ENABLED=true` requests filesystem and process isolation for local
 Claude, Codex and ACP **turns** on a Linux server. Install `bubblewrap` through
 your host's package manager and allow unprivileged user namespaces according to
-your host policy. Desktop launches and status/sign-in probes keep their existing
+your host policy. Leave it disabled on desktop; enabling it on an unsupported
+platform refuses turn launch. Status/sign-in probes keep their existing
 behavior. The feature defaults off. An enabled turn that cannot create its box
 fails; it never retries outside the box.
 

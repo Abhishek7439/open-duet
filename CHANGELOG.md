@@ -4,6 +4,9 @@
 
 ### Added
 
+- Opt-in Linux turn sandbox preview isolates filesystem mounts, processes and
+  temporary files with bubblewrap and refuses launch when checks fail. Network
+  isolation and real Linux/provider lifecycle qualification remain open.
 - Publish an engine/platform capability matrix with separate source, automated,
   live-provider and packaged-release gates; correct stale Codex MCP and browser
   support descriptions.

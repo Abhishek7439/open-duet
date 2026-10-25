@@ -35,6 +35,9 @@ it does not itself persist notes. See [memory](MEMORY.md).
 | Antigravity | Synthetic install, OAuth, model, approval and resume tests; official macOS ARM64 runtime startup | OAuth URL startup only; complete account sign-in and prompt/approval/resume remain open | Open; Windows unsupported |
 | Install/update/recovery | Desktop launcher, updater and backend startup tests | Installer download/install, upgrade preservation and recovery require actual artifacts | Open |
 | Personal server | Server smoke, pairing and lease tests | Real Linux deployment, sign-in, update and backup/restore remain open | Open |
+| Explicit private notes | Standalone literal remember requests, no-helper Codex fixture, provenance, simple correction, redaction and Undo tests | Real-provider response behavior remains open | Open |
+| Webhook deduplication | Durable delivery receipts, concurrent SQLite admission, restart and authorization tests; PostgreSQL schema/migration checks | Live PostgreSQL concurrency remains open | Open |
+| Linux turn sandbox preview | Opt-in filesystem/PID box with mount/refusal tests; real namespace test skips on macOS | Real Linux engine lifecycle remains open; network isolation is unimplemented | Open |
 
 Historical evidence belongs to the source and environment recorded in its
 linked guide. It is not automatically refreshed by running a newer unit suite.
