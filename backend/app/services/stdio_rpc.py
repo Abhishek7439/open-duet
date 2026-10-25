@@ -56,14 +56,19 @@ class StdioRpc:
         self._stderr = asyncio.create_task(self._read_stderr())
 
     @classmethod
-    async def spawn(cls, args: list[str], *, cwd: str, max_bytes: int, env: dict | None = None, diagnostic=None) -> "StdioRpc":
+    async def spawn(cls, args: list[str], *, cwd: str, max_bytes: int, env: dict | None = None, diagnostic=None, sandbox: bool = False, sandbox_writable=(), sandbox_readonly=()) -> "StdioRpc":
+        env = env if env is not None else child_env()
+        if sandbox:
+            from app.core import turn_sandbox
+            await asyncio.to_thread(turn_sandbox.self_check)
+            args = turn_sandbox.command(args, cwd=cwd, env=env, writable=sandbox_writable, readonly=sandbox_readonly)
         proc = await asyncio.create_subprocess_exec(
             *args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
-            env=env if env is not None else child_env(),
+            env=env,
             start_new_session=sys.platform != "win32",
             limit=LINE_LIMIT_BYTES,
         )

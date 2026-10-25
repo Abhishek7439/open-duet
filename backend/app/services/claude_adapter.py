@@ -466,6 +466,9 @@ class ClaudeAdapter:
 
         if ctx.aborted:
             return failed("The run was stopped because it no longer owns its turn.", "lost")
+        from app.core.turn_sandbox import SandboxUnavailable
+        if isinstance(attempt.error, SandboxUnavailable):
+            return failed(str(attempt.error), "sandbox_unavailable")
         if isinstance(attempt.error, local_claude_runner.ClaudeCliUnavailable):
             return failed(str(attempt.error), "cli_unavailable")
         if attempt.error is not None or attempt.output is None:

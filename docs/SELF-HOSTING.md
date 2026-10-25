@@ -307,3 +307,51 @@ Each line says what was run. "Not run" means exactly that: do not assume it work
 | PostgreSQL as the server's database | The backend suite passes on it; the server routes above were run on SQLite |
 
 See [ROADMAP.md](ROADMAP.md) for what is next.
+
+## Optional Linux turn sandbox (preview)
+
+`TURN_SANDBOX_ENABLED=true` requests filesystem and process isolation for local
+Claude, Codex and ACP **turns** on a Linux server. Install `bubblewrap` through
+your host's package manager and allow unprivileged user namespaces according to
+your host policy. Desktop launches and status/sign-in probes keep their existing
+behavior. The feature defaults off. An enabled turn that cannot create its box
+fails; it never retries outside the box.
+
+The box starts with an empty filesystem and exposes read-only system runtimes,
+a small set of resolver/CA files, the backend's `app` package and Python
+virtual environment. It gives the turn its own PID/IPC/UTS namespaces, a fresh
+`/proc`, private `/tmp` and `/run`, a restricted device tree, no capabilities,
+and parent-death cleanup. The workspace, that turn's team/memory mailboxes,
+and named engine account folder (`CODEX_HOME`/`~/.codex` or
+`CLAUDE_CONFIG_DIR`/`~/.claude`) are writable. Attached image files are mounted
+read-only. The shared legacy workspace and its enclosing folders are refused; use an
+agent's own workspace. When an agent uses an external workspace, its private
+agent folder stays hidden; the backend still answers that agent's memory tools
+through the mounted mailbox.
+
+Custom runtime installations outside standard system paths need explicit
+comma-separated `TURN_SANDBOX_READONLY_PATHS` entries. Additional account files
+(such as Claude's `~/.claude.json`) and ACP account directories can be granted
+with `TURN_SANDBOX_WRITABLE_PATHS`. Grant the narrowest path: a whole HOME,
+filesystem root or application data parent is rejected. These are trusted owner
+settings; everything explicitly granted is visible to the turn. Bind paths are
+canonicalized before use, so aliases through symlinks need the real path in the
+engine's configuration too. Computer-provider sockets and native host control
+are not qualified with this preview; do not broaden mounts to grant Docker or
+host sockets.
+
+From `backend`, run `python -m app.core.turn_sandbox` with the server's normal
+configuration to check availability. Each enabled turn also runs the check. It
+verifies that a host canary is absent and the PID namespace differs from the
+backend; errors stop launch. It reports network access as **unrestricted**.
+The optional Linux test in `tests/core/test_turn_sandbox.py` additionally checks
+workspace writes; it is skipped on hosts without Linux/bubblewrap.
+
+This is stage C only. Network namespaces with a filtered egress bridge (stage
+D), credential brokering and syscall filtering remain open. An engine can
+still reach loopback, the server API and metadata over the shared network;
+provider account credentials granted to the box remain readable. Do not claim
+isolation for hostile unattended integrations until C and D pass a real Linux
+host qualification, including engine sign-in/resume, approvals, stop/timeouts
+and orphan cleanup. The preview has automated mount/refusal coverage; no real
+Linux or packaged-provider qualification is recorded here.

@@ -368,11 +368,17 @@ class _AcpTurn:
         loop = asyncio.get_running_loop()
         self.aborted = asyncio.Event()
         self.ctx.on_abort(lambda: loop.call_soon_threadsafe(self.aborted.set))
+        from app.core import turn_sandbox
         try:
             self.rpc = await StdioRpc.spawn(
                 self.argv, cwd=str(self.workspace), max_bytes=self.max_text * RAW_STREAM_SIZE_FACTOR, env=self.env,
                 diagnostic=self.adapter.diagnostic if self.adapter.redact_diagnostics else None,
+                sandbox=True,
+                sandbox_writable=turn_sandbox.mailbox_mounts((self.ctx.team_launch, self.ctx.memory_launch)),
+                sandbox_readonly=[Path(image["path"]) for image in (self.ctx.images or [])],
             )
+        except turn_sandbox.SandboxUnavailable as exc:
+            return TurnOutcome("failed", error=str(exc), error_code="sandbox_unavailable")
         except (OSError, ValueError):
             return TurnOutcome("failed", error="The agent's command could not be started.", error_code="cli_unavailable")
         try:

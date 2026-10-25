@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     LOCAL_CODEX_CLI_PATH: str = ""
     # Working directory for local runs. Empty means ~/.open-dots/local.
     LOCAL_WORKSPACE_ROOT: str = ""
+    # Linux server-only filesystem/PID isolation. A failed request never falls back.
+    TURN_SANDBOX_ENABLED: bool = False
+    # Comma-separated explicit runtime and login grants; never a whole HOME/data folder.
+    TURN_SANDBOX_READONLY_PATHS: str = ""
+    TURN_SANDBOX_WRITABLE_PATHS: str = ""
     TEAM_ENABLED: bool = True
     TEAM_LEAD_AUTO: bool = True
     # Teammates may flag a gate only the person can lift (app/team/notices.py). Off by default.

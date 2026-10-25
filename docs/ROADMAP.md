@@ -137,3 +137,12 @@ polled preview frames.
   memory correctness and release confidence.
 - Do not rebuild the existing search, role gallery, routines, team delegation,
   rooms, desktop preview, takeover or structured browser tools.
+
+### Linux turn sandbox preview
+
+Local CLI turns can opt into a Linux bubblewrap filesystem/PID box with explicit
+mounts and a launch self-check (`TURN_SANDBOX_ENABLED`; see
+[SELF-HOSTING.md](SELF-HOSTING.md#optional-linux-turn-sandbox-preview)). It fails
+closed when unavailable and keeps status probes outside the box. This adds the
+stage C implementation; real-host lifecycle qualification, network isolation
+(stage D), credential brokering and syscall filtering remain open.

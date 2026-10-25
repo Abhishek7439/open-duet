@@ -342,6 +342,9 @@ def run_blocking(
     on_stdout_line: LineHandler | None = None,
     control: RunControl | None = None,
     keep_stdin_open: bool | None = None,
+    sandbox: bool = False,
+    sandbox_writable=(),
+    sandbox_readonly=(),
 ) -> RunOutput:
     """Run a process to completion with a time limit and an output cap,
     killing its whole process tree if either is exceeded.
@@ -363,13 +366,18 @@ def run_blocking(
     else:
         popen_kwargs["start_new_session"] = True
 
+    env = _child_env()
+    if sandbox:
+        from app.core import turn_sandbox
+        turn_sandbox.self_check()
+        args = turn_sandbox.command(args, cwd=cwd, env=env, writable=sandbox_writable, readonly=sandbox_readonly)
     proc = subprocess.Popen(
         args,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=cwd,
-        env=_child_env(),
+        env=env,
         **popen_kwargs,
     )
     engine_processes.record(proc.pid, args[0])
@@ -665,8 +673,12 @@ def _run_blocking(
     # text, so the input format is switched for that run only.
     if images and not tools:
         args = [*args, "--input-format", "stream-json"]
+    from app.core import turn_sandbox
     return run_blocking(
         args,
+        sandbox=True,
+        sandbox_writable=turn_sandbox.mailbox_mounts((mcp_servers or {}).values()),
+        sandbox_readonly=[Path(image["path"]) for image in (images or [])],
         stdin_text=user_message_line(prompt, images) if tools or images else prompt,
         cwd=workspace_dir() if workspace is None else workspace,
         timeout_seconds=app_settings.get("LOCAL_TASK_TIMEOUT_SECONDS"),
