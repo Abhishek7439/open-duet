@@ -68,7 +68,10 @@ export function GoogleEngineSetup({ engine, onChanged }: { engine: Engine; onCha
     </div>
     {running && <p role="status" className="text-xs text-muted">{operation.kind === "install" ? "Downloading and verifying the official Google runtime. This can take a few minutes." : operation.kind === "models" ? "Refreshing the models available to your account…" : "Waiting for Google sign-in and loading your models…"}</p>}
     {running && operation.authorization_url && <div className="space-y-2">
-      <a className="text-sm underline" href={operation.authorization_url} target="_blank" rel="noreferrer">Continue to Google sign-in</a>
+      <button type="button" className={BUTTON} disabled={busy} onClick={() => void act(async () => {
+        if (!window.openDots?.openGoogleSignIn) throw new Error("Open this setup in the Open Duet desktop app to continue.");
+        await window.openDots.openGoogleSignIn(operation.authorization_url!);
+      })}>Continue to Google sign-in</button>
       <details><summary className="cursor-pointer text-xs">Signing in from another computer?</summary>
         <p className="mt-2 text-xs text-muted">After signing in, copy the complete localhost redirect URL from your browser and paste it below.</p>
         <form className="mt-2 flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void act(async () => { const value = callback; setCallback(""); await api.completeGoogleSetup(operation.id, value); }); }}>

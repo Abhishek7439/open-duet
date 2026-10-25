@@ -19,6 +19,7 @@ const { createKeyStore, KeyStoreError } = require("./src/keystore");
 const { startBackend, backendEnvironment, newToken } = require("./src/backend");
 const { attachTokenTo, lockDown, sameOrigin } = require("./src/origin");
 const { registerPathPicker } = require("./src/path-picker");
+const { registerGoogleSignIn } = require("./src/google-sign-in");
 const { lastReason, describeFailure, describeUnexpectedExit } = require("./src/messages");
 const { NativeControl, registerNativeControl } = require("./src/native-control");
 const { createUpdater } = require("./src/updater");
@@ -145,6 +146,7 @@ async function main() {
   registerNativeControl({ ipcMain, dialog, service: nativeControl, getWindow: () => window, getOrigin: () => backendOrigin });
   const nativeConnection = await nativeControl.listen();
   registerPathPicker({ ipcMain, dialog, getWindow: () => window, getOrigin: () => backendOrigin });
+  registerGoogleSignIn({ ipcMain, openExternal: (url) => shell.openExternal(url), getWindow: () => window, getOrigin: () => backendOrigin });
   updater = createUpdater({
     currentVersion: app.getVersion(),
     platform: process.platform,

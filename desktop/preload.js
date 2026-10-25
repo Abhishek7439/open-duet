@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("openDots", {
   choosePath: (kind) => ipcRenderer.invoke("open-dots:choose-path", kind),
+  openGoogleSignIn: (url) => ipcRenderer.invoke("open-dots:google-sign-in", url),
   nativeControl: (request) => ipcRenderer.invoke("open-dots:native-control", request),
   updates: {
     run: (action) => ipcRenderer.invoke("open-dots:update", action),

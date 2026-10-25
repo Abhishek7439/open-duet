@@ -29,6 +29,7 @@ class InstallError(ValueError):
 
 MAX_ARCHIVE_BYTES = 1024**3
 MAX_EXPANDED_BYTES = 3 * 1024**3
+FREE_SPACE_MARGIN = 256 * 1024**2
 MEMBERS = ("agy_acp_server.par", "localharness_external")
 
 
@@ -93,8 +94,8 @@ async def install(validate) -> None:
     if installed():
         return
     root.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if shutil.disk_usage(root.parent).free < MAX_ARCHIVE_BYTES + MAX_EXPANDED_BYTES:
-        raise InstallError("Antigravity installation needs 4 GiB of free disk space.")
+    if shutil.disk_usage(root.parent).free < MAX_ARCHIVE_BYTES + FREE_SPACE_MARGIN:
+        raise InstallError("Antigravity needs 1.25 GiB of free space for a safe download. Close other apps and retry.")
     with tempfile.TemporaryDirectory(prefix=".install-", dir=root.parent) as temporary:
         stage = Path(temporary)
         archive = stage / "download.zip"
@@ -108,6 +109,12 @@ async def install(validate) -> None:
                         if count > MAX_ARCHIVE_BYTES:
                             raise InstallError("The Antigravity download exceeded its size limit.")
                         target.write(chunk)
+        with zipfile.ZipFile(archive) as package:
+            expanded_bytes = sum(entry.file_size for entry in package.infolist())
+        if expanded_bytes > MAX_EXPANDED_BYTES:
+            raise InstallError("The Antigravity archive exceeds its expanded size limit.")
+        if shutil.disk_usage(stage).free < expanded_bytes + FREE_SPACE_MARGIN:
+            raise InstallError("Antigravity needs more free space to unpack. Free disk space and retry.")
         candidate = stage / "runtime"
         candidate.mkdir(mode=0o700)
         # Extraction is bounded and runs outside the event loop; cancellation must

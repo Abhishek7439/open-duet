@@ -47,7 +47,8 @@ The installer downloads Google's official ACP runtime 1.4.3, checks the pinned
 SHA-256 from the [ACP registry](https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json),
 rejects unexpected archive members, and validates its ACP identity before
 publishing the install. macOS and Linux on Intel and ARM64 are supported;
-Windows support is deferred. Installation requires 4 GiB free space.
+Windows support is deferred. The installer checks the actual archive size and
+expanded size against available free space before unpacking.
 
 Sign in with an eligible personal Google account. This connection does not use
 Gemini API keys or Enterprise authentication. Google's [authentication guide](https://www.antigravity.google/docs/install?tab=cli)
