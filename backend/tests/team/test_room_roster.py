@@ -123,7 +123,7 @@ async def test_owner_team_and_archived_members_validated(api, harness, sessions,
     async with sessions() as db:
         from app.db.models import Room
         stored = await db.get(Room, room['id'])
-        stored.owner_id = 'another-room-owner'
+        stored.owner_id = foreign_owner
         await db.commit()
     try:
         assert (await api.patch(f"/rooms/{room['id']}", json=roster([lead.id], [lead.id, worker.id, standalone.id]))).status_code == 404
