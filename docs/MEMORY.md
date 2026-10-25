@@ -632,7 +632,10 @@ Send a standalone `Remember that my favorite color is teal` message to a named
 agent to save that literal fact before the engine answers. This path runs in
 the app, so it works on Codex without a helper and with automatic upkeep off.
 Notes must be enabled. It accepts one plain line of at most 1,000 characters;
-text that resembles a secret is refused. Pasted multiline content, room turns,
+text that resembles a secret is refused. Multi-sentence requests, lists and
+compound or ambiguous statements stay on the existing proposal/upkeep path
+instead of bypassing review. Decimal values, numeric time punctuation and email
+addresses are accepted as literal values. Pasted multiline content, room turns,
 routines, webhooks and delegated jobs cannot use this path. It writes only the
 agent's private `MEMORY.md`, never shared team memory.
 

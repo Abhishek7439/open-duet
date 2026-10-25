@@ -7,7 +7,14 @@ import re
 
 from app.services import agent_memory, memory_entries, memory_journal
 
-_REQUEST = re.compile(r"(?:please\s+)?remember\s+(?:that\s+)?([^\n]+?)[.!]?\s*", re.I)
+_REQUEST = re.compile(r"(?:please[ \t]+)?remember[ \t]+(?:that[ \t]+)?([^\r\n]+?)[.!]?[ \t]*", re.I)
+# Ambiguous compounds stay on the existing reviewed-proposal/upkeep path.
+# Periods inside literal values (3.14, an email address) are not sentences.
+_COMPOUND = re.compile(
+    r"[.!?](?:\s|$)|[;!?&|/]|\b(?:and|or|also|then|but|plus)\b|"
+    r",|(?<!\d):|:(?!\d)|\s\+\s|^(?:[-*•]|\d+[.)]|\(\d+\))\s", re.I,
+)
+_THOUSANDS = re.compile(r"(?<![\w,.-])[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\w,.-])")
 _SUBJECT = re.compile(r"(my [\w '-]{1,80}?)\s+(?:is|are)\s+.+", re.I)
 
 TRUTH_NOTE = (
@@ -35,6 +42,12 @@ def prepare(agent, thread, turn, *, internal: bool = False) -> str:
     # Keep commands bounded and literal. Never flatten pasted text into a fact.
     if not fact or len(fact) > memory_entries.ENTRY_MAX_CHARS or any(c in fact for c in ('`', '·', '~')):
         return TRUTH_NOTE + " This request was not saved: send one plain fact of at most 1,000 characters."
+    if _COMPOUND.search(_THOUSANDS.sub("", fact)):
+        return TRUTH_NOTE + (
+            " No literal note was saved from this request: it contains multiple or ambiguous statements. "
+            "Keep this on the existing reviewed-proposal or configured upkeep path; "
+            "do not claim a private note was saved without a successful write."
+        )
     clean, redacted = agent_memory.redact_secrets(fact)
     if redacted:
         return TRUTH_NOTE + " This request was not saved because it contains text that looks like a secret."
