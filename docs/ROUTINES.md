@@ -139,6 +139,7 @@ returns the secret **once**. `DELETE` turns it off.
 curl -X POST http://127.0.0.1:8000/hooks/12 \
   -H "Authorization: Bearer rt_…" \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: deploy-event-123" \
   -d '{"event": "deploy", "status": "failed"}'
 ```
 
@@ -147,8 +148,22 @@ curl -X POST http://127.0.0.1:8000/hooks/12 \
   401.
 - The body is limited to `ROUTINE_WEBHOOK_MAX_BYTES` (default 64 KiB; larger
   is 413) and must be UTF-8 text.
-- A paused routine answers 409. At most 3 webhook runs per routine may be
-  unfinished at once; more answer 429.
+- Send an optional `Idempotency-Key` header (1–128 printable ASCII characters,
+  without spaces) to identify a delivery. For seven days after acceptance, a
+  retry with the same key, body and content type returns the original run ID,
+  including after restart, interruption, completion or pausing. It never
+  queues or replays that run. A changed body/content type with that key answers
+  409; malformed keys answer 400. Keys are scoped to the routine and stored
+  only as SHA-256 hashes. Use a fresh key for each new event.
+- Receipts and queued runs commit atomically; concurrent retries admit one run.
+  Receipt expiry is fixed at the first acceptance and expired entries are
+  removed on the routine's next keyed delivery. After seven days, reusing a
+  key can create a new run. Calls without a key are independent deliveries.
+- Authentication, body size and UTF-8 checks still apply to retries. Rotating
+  or disabling the secret revokes old credentials, including for receipt reads.
+- A paused routine answers 409 for new deliveries. At most 3 webhook runs per
+  routine may be unfinished at once; more answer 429. A valid receipt retry
+  consumes no queue slot and can return its original run while paused.
 - Accepted calls answer 202 with the run id; the run starts within one poll.
 - The body is appended to the routine's prompt inside a clearly delimited
   block that says it is untrusted data, with `<`, `>` and `&` escaped so the

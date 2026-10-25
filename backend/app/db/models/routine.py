@@ -125,3 +125,20 @@ class RoutineRun(Base):
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime, server_default=func.now(), nullable=False
     )
+
+
+class WebhookReceipt(Base):
+    """A bounded retry window for an accepted webhook, committed with its run."""
+
+    __tablename__ = "routine_webhook_receipt"
+    __table_args__ = (Index("ix_routine_webhook_receipt_expires_at", "expires_at"),)
+
+    routine_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("routine.id", ondelete="CASCADE"), primary_key=True
+    )
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    run_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("routine_run.id", ondelete="CASCADE"), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)

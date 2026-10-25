@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+### Added
+
 - Publish an engine/platform capability matrix with separate source, automated,
   live-provider and packaged-release gates; correct stale Codex MCP and browser
   support descriptions.
+- Routine webhooks accept an optional `Idempotency-Key` and persist seven-day
+  receipts so concurrent or restarted sender retries return the original run
+  without executing it again. Reusing a key with changed content is rejected.
 
 ## v0.4.0 (2026-10-25)
 

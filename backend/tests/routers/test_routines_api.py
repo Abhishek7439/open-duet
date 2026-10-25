@@ -246,3 +246,42 @@ async def test_ingress_serves_only_health_and_hooks(scheduler, agent, api):
         delivered = await outside.post(f"/hooks/{created['id']}", headers={"Authorization": f"Bearer {secret}"}, content="ping")
         assert delivered.status_code == 202
     ingress_app.dependency_overrides.clear()
+
+
+async def test_webhook_idempotency_header(api, agent):
+    created = await make(api, agent, schedule_kind="manual", schedule_spec={})
+    secret = (await api.post(f"/api/v1/routines/{created['id']}/webhook")).json()["secret"]
+    hook = f"/hooks/{created['id']}"
+    headers = {"Authorization": f"Bearer {secret}", "Idempotency-Key": "delivery-1"}
+    first = await api.post(hook, headers=headers, content="first")
+    again = await api.post(hook, headers=headers, content="first")
+    assert first.status_code == again.status_code == 202
+    assert first.json()["run_id"] == again.json()["run_id"]
+    assert (await api.post(hook, headers=headers, content="different")).status_code == 409
+    for key in ("", "x" * 129, "has space"):
+        response = await api.post(hook, headers={**headers, "Idempotency-Key": key}, content="first")
+        assert response.status_code == 400
+
+
+async def test_webhook_receipt_retries_when_full_and_secret_revocation(api, agent):
+    created = await make(api, agent, schedule_kind="manual", schedule_spec={})
+    endpoint = f"/api/v1/routines/{created['id']}/webhook"
+    secret = (await api.post(endpoint)).json()["secret"]
+    hook = f"/hooks/{created['id']}"
+    headers = {"Authorization": f"Bearer {secret}", "Idempotency-Key": "original"}
+    first = await api.post(hook, headers=headers, content="payload")
+    assert first.status_code == 202
+    for key in ("second", "third"):
+        assert (await api.post(hook, headers={**headers, "Idempotency-Key": key}, content="payload")).status_code == 202
+    assert (await api.post(hook, headers={**headers, "Idempotency-Key": "fourth"}, content="payload")).status_code == 429
+    replay = await api.post(hook, headers=headers, content="payload")
+    assert replay.status_code == 202 and replay.json() == first.json()
+    rotated = (await api.post(endpoint)).json()["secret"]
+    denied = await api.post(hook, headers=headers, content="payload")
+    assert denied.status_code == 401 and "run_id" not in denied.json()
+    current = {**headers, "Authorization": f"Bearer {rotated}"}
+    replay = await api.post(hook, headers=current, content="payload")
+    assert replay.status_code == 202 and replay.json() == first.json()
+    assert (await api.delete(endpoint)).status_code == 200
+    denied = await api.post(hook, headers=current, content="payload")
+    assert denied.status_code == 401 and "run_id" not in denied.json()

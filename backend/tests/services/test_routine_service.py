@@ -456,3 +456,68 @@ async def test_review_gap_creation_keeps_documented_shifted_occurrence(sessions,
     if expected_at.date().isoformat() == "2026-03-29":
         assert expected_at.astimezone(ZoneInfo("Europe/Berlin")).strftime("%H:%M") == "03:30"
     assert refreshed.next_run_at == expected_at
+
+
+async def test_webhook_receipt_concurrent_delivery_and_fresh_sessions(sessions, owner, agent, clock):
+    import asyncio
+    from app.db.models import WebhookReceipt
+
+    routine = await make_routine(sessions, owner, agent, clock, schedule_kind="manual", schedule_spec={})
+    async with sessions() as db:
+        _, secret = await service.enable_webhook(db, owner, routine.id)
+
+    async def deliver():
+        async with sessions() as db:
+            return await service.accept_webhook(
+                db, routine.id, secret, "payload", "text/plain", now=clock(), delivery_id="event-123"
+            )
+
+    deliveries = await asyncio.gather(*(deliver() for _ in range(8)))
+    assert len({r.id for r in deliveries}) == 1
+    original = deliveries[0]
+    assert len(await runs_of(sessions, routine.id)) == 1
+    # A later process/session still maps the delivery to the same run, even
+    # after it is interrupted and the routine has been paused.
+    async with sessions() as db:
+        run = await db.get(RoutineRun, original.id)
+        run.state = "interrupted"
+        await db.commit()
+        await service.set_paused(db, owner, routine.id, True, now=clock())
+    assert (await deliver()).id == original.id
+    async with sessions() as db:
+        receipts = (await db.execute(select(WebhookReceipt).where(WebhookReceipt.routine_id == routine.id))).scalars().all()
+        assert len(receipts) == 1
+        assert receipts[0].key_hash != "event-123"
+        assert receipts[0].expires_at == clock() + timedelta(days=7)
+        with pytest.raises(service.WebhookRejected) as rejected:
+            await service.accept_webhook(db, routine.id, secret, "changed", "text/plain", delivery_id="event-123", now=clock())
+        assert rejected.value.status_code == 409
+
+
+async def test_webhook_receipt_expiry_auth_and_body_independent_keys(sessions, owner, agent, clock):
+    routine = await make_routine(sessions, owner, agent, clock, schedule_kind="manual", schedule_spec={})
+    async with sessions() as db:
+        _, secret = await service.enable_webhook(db, owner, routine.id)
+
+    async def deliver(key, supplied_secret=secret):
+        async with sessions() as db:
+            return await service.accept_webhook(db, routine.id, supplied_secret, "same", None, delivery_id=key, now=clock())
+
+    first = await deliver("one")
+    second = await deliver("two")
+    assert first.id != second.id
+    assert (await deliver("one")).id == first.id
+    with pytest.raises(service.WebhookRejected) as rejected:
+        await deliver("one", "wrong")
+    assert rejected.value.status_code == 401
+    clock.advance(days=7)
+    third = await deliver("one")
+    assert third.id not in (first.id, second.id)
+    # Existing callers without a key keep receiving independent runs.
+    async with sessions() as db:
+        for run in (await db.execute(select(RoutineRun).where(RoutineRun.routine_id == routine.id))).scalars():
+            run.state = "completed"
+        await db.commit()
+    assert (await deliver(None)).id != (await deliver(None)).id
+    async with sessions() as db:
+        await service.delete_routine(db, owner, routine.id)

@@ -72,3 +72,16 @@ CREATE INDEX ix_routine_run_state ON routine_run (state);
 CREATE UNIQUE INDEX uq_routine_run_occurrence ON routine_run (routine_id, scheduled_for) WHERE trigger = 'schedule';
 
 CREATE UNIQUE INDEX uq_routine_run_retry_of ON routine_run (retry_of);
+
+CREATE TABLE routine_webhook_receipt (
+	routine_id BIGINT NOT NULL, 
+	key_hash VARCHAR(64) NOT NULL, 
+	payload_hash VARCHAR(64) NOT NULL, 
+	run_id BIGINT NOT NULL, 
+	expires_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (routine_id, key_hash), 
+	FOREIGN KEY(routine_id) REFERENCES routine (id) ON DELETE CASCADE, 
+	FOREIGN KEY(run_id) REFERENCES routine_run (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_routine_webhook_receipt_expires_at ON routine_webhook_receipt (expires_at);

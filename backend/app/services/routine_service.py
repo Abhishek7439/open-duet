@@ -26,7 +26,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models.agent import Agent
 from app.db.models.approval import Approval
-from app.db.models.routine import ACTIVE_RUN_STATES, Routine, RoutineRun
+from app.db.models.routine import ACTIVE_RUN_STATES, Routine, RoutineRun, WebhookReceipt
 from app.db.models.turn import Turn
 from app.db.models.thread import Thread
 from app.db.models.work_item import WorkItemRun
@@ -43,6 +43,8 @@ PROMPT_CHARS = 20_000
 RESULT_CHARS = 4_000
 ERROR_CHARS = 2_000
 MAX_PENDING_WEBHOOK_RUNS = 3
+WEBHOOK_RECEIPT_DAYS = 7
+WEBHOOK_DELIVERY_ID_CHARS = 128
 # An occurrence this late still counts as on time (the poll interval and a
 # busy event loop add a little delay), on top of the routine's catch-up window.
 ON_TIME_SECONDS = 120
@@ -473,10 +475,15 @@ async def disable_webhook(db: AsyncSession, owner_id: str, routine_id: int) -> R
     return routine
 
 
-async def authorize_webhook(db: AsyncSession, routine_id: int, secret: str | None) -> Routine:
+async def authorize_webhook(
+    db: AsyncSession, routine_id: int, secret: str | None, *, lock: bool = False
+) -> Routine:
     """The routine whose webhook this secret opens. An unknown routine, a
     routine without a webhook and a wrong secret are the same 401."""
-    routine = await db.get(Routine, routine_id)
+    query = select(Routine).where(Routine.id == routine_id)
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    routine = (await db.execute(query)).scalar_one_or_none()
     if routine is None or not secret_matches(secret, routine.webhook_secret_hash):
         raise WebhookRejected(401, "Unknown webhook or wrong secret")
     return routine
@@ -490,12 +497,36 @@ async def accept_webhook(
     content_type: str | None,
     *,
     now: datetime | None = None,
+    delivery_id: str | None = None,
 ) -> RoutineRun:
     now = now or utcnow()
     await begin_write(db)
     # Checked again inside the write transaction: a rotation since the first
     # check must refuse this delivery.
-    routine = await authorize_webhook(db, routine_id, secret)
+    routine = await authorize_webhook(db, routine_id, secret, lock=True)
+    # PostgreSQL serializes admissions on this routine row. SQLite uses the
+    # write transaction above. A retry never consumes an admission slot.
+    key_hash = payload_hash = None
+    if delivery_id is not None:
+        if not (1 <= len(delivery_id) <= WEBHOOK_DELIVERY_ID_CHARS) or any(
+            ord(c) < 33 or ord(c) > 126 for c in delivery_id
+        ):
+            raise WebhookRejected(400, "Idempotency-Key must be 1–128 printable ASCII characters without spaces")
+        key_hash = hashlib.sha256(delivery_id.encode("ascii")).hexdigest()
+        payload_hash = hashlib.sha256(
+            json.dumps([content_type or "", payload], ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        # Expired keys can be reused; the original run history stays intact.
+        await db.execute(delete(WebhookReceipt).where(
+            WebhookReceipt.routine_id == routine_id, WebhookReceipt.expires_at <= now
+        ))
+        receipt = await db.get(WebhookReceipt, (routine_id, key_hash))
+        if receipt is not None:
+            if receipt.payload_hash != payload_hash:
+                raise WebhookRejected(409, "Idempotency-Key was already used with a different body or content type")
+            run = await db.get(RoutineRun, receipt.run_id)
+            await db.commit()
+            return run
     if routine.paused:
         raise WebhookRejected(409, "This routine is paused")
     if await _count_active(db, routine.id, "webhook") >= MAX_PENDING_WEBHOOK_RUNS:
@@ -518,6 +549,12 @@ async def accept_webhook(
         ),
     )
     db.add(run)
+    await db.flush()
+    if key_hash is not None:
+        db.add(WebhookReceipt(
+            routine_id=routine.id, key_hash=key_hash, payload_hash=payload_hash,
+            run_id=run.id, expires_at=now + timedelta(days=WEBHOOK_RECEIPT_DAYS),
+        ))
     await db.commit()
     await db.refresh(run)
     return run

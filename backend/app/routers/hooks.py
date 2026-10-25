@@ -59,7 +59,8 @@ async def receive(
     async with scheduler.session() as db:
         try:
             run = await service.accept_webhook(
-                db, routine_id, secret, payload, request.headers.get("content-type")
+                db, routine_id, secret, payload, request.headers.get("content-type"),
+                delivery_id=request.headers.get("idempotency-key"),
             )
         except service.WebhookRejected as exc:
             return _refuse(exc.status_code, exc.message)
