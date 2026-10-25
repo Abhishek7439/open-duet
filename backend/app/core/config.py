@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     LOCAL_WORKSPACE_ROOT: str = ""
     # Linux server-only filesystem/PID isolation. A failed request never falls back.
     TURN_SANDBOX_ENABLED: bool = False
+    # Opt-in stage D: private network namespace and public HTTP(S)-only gate.
+    # Requires TURN_SANDBOX_ENABLED; never falls back to host networking.
+    TURN_SANDBOX_NETWORK_ENABLED: bool = False
     # Comma-separated explicit runtime and login grants; never a whole HOME/data folder.
     TURN_SANDBOX_READONLY_PATHS: str = ""
     TURN_SANDBOX_WRITABLE_PATHS: str = ""

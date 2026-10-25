@@ -1,7 +1,7 @@
-"""Opt-in Linux filesystem/PID box for engine turns (stage C).
+"""Opt-in Linux filesystem/PID box with an optional isolated HTTP(S) gate.
 
-A minimal root is populated from explicit mounts. This does NOT restrict
-network traffic; do not treat it as protection from hostile unattended input.
+A minimal root is populated from explicit mounts. Stage C shares the host
+network. Stage D explicitly opts into a private network namespace.
 """
 from __future__ import annotations
 
@@ -79,6 +79,8 @@ def _base() -> list[str]:
               '--unshare-ipc', '--unshare-uts', '--cap-drop', 'ALL', '--proc', '/proc',
               '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', '/run',
               '--setenv', 'TMPDIR', '/tmp', '--setenv', 'TMP', '/tmp', '--setenv', 'TEMP', '/tmp']
+    if settings.TURN_SANDBOX_NETWORK_ENABLED:
+        result.append('--unshare-net')
     # No host root bind: other users, application data, /run sockets and /tmp
     # mailboxes start absent. Keep standard runtimes read-only.
     for name in ('/usr', '/bin', '/sbin', '/lib', '/lib64'):
@@ -103,6 +105,8 @@ def command(args: list[str], *, cwd: str | Path, env: Mapping[str, str],
     Mount source paths are canonicalized to prevent a symlink granting a
     broader directory. Custom runtimes outside /usr need an explicit grant.
     """
+    if settings.TURN_SANDBOX_NETWORK_ENABLED and not settings.TURN_SANDBOX_ENABLED:
+        raise SandboxUnavailable('Network isolation requires the Linux turn sandbox; no engine was started.')
     if not settings.TURN_SANDBOX_ENABLED:
         return args
     result = _base()
@@ -135,6 +139,18 @@ def command(args: list[str], *, cwd: str | Path, env: Mapping[str, str],
         for path in dict.fromkeys(_path(p) for p in paths):
             _check_grant(path)
             result.extend([flag, str(path), str(path)])
+    if settings.TURN_SANDBOX_NETWORK_ENABLED:
+        from app.core import turn_egress
+        helper = str(Path(turn_egress.__file__).resolve())
+        # Only this backend-created UNIX socket is mounted from host /tmp.
+        result.extend(['--ro-bind', '__TURN_EGRESS_SOCKET__', turn_egress.SOCKET_PATH])
+        proxy = f'http://127.0.0.1:{turn_egress.PROXY_PORT}'
+        for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'):
+            result.extend(['--setenv', name, proxy])
+        for name in ('NO_PROXY', 'no_proxy', 'ALL_PROXY', 'all_proxy'):
+            result.extend(['--unsetenv', name])
+        result.extend(['--chdir', str(work), '--', sys.executable, helper, 'bridge', *args])
+        return [sys.executable, helper, 'supervise', *result]
     result.extend(['--chdir', str(work), '--', *args])
     return result
 
@@ -145,12 +161,16 @@ def self_check() -> dict:
     Called before each enabled turn, so a changed host configuration never
     falls through to an unboxed launch. No provider key is passed to the probe.
     """
+    if settings.TURN_SANDBOX_NETWORK_ENABLED and not settings.TURN_SANDBOX_ENABLED:
+        raise SandboxUnavailable('Network isolation requires the Linux turn sandbox; no engine was started.')
     if not settings.TURN_SANDBOX_ENABLED:
         return {'status': 'off', 'reason': 'Not enabled', 'network': 'unrestricted'}
     args = _base()
     # $$ is a shell in a fresh PID namespace; the backend's /proc entry must
     # not be the same process. The namespace identifier provides a direct check.
     script = 'test ! -e "$1" && readlink /proc/self/ns/pid'
+    if settings.TURN_SANDBOX_NETWORK_ENABLED:
+        script += ' && readlink /proc/self/ns/net'
     import tempfile
     data_root = settings.SQLITE_FILE.expanduser().resolve().parent
     data_root.mkdir(parents=True, exist_ok=True)
@@ -162,10 +182,14 @@ def self_check() -> dict:
                                   env={'PATH': '/usr/bin:/bin'}, capture_output=True, text=True, timeout=10)
         except (OSError, subprocess.SubprocessError) as exc:
             raise SandboxUnavailable('The Linux sandbox self-check failed; no engine was started.') from exc
-    if done.returncode or done.stdout.strip() == os.readlink('/proc/self/ns/pid') or not done.stdout.startswith('pid:['):
+    lines = done.stdout.strip().splitlines()
+    if done.returncode or not lines or lines[0] == os.readlink('/proc/self/ns/pid') or not lines[0].startswith('pid:['):
         raise SandboxUnavailable('The Linux sandbox self-check failed; no engine was started.')
+    if settings.TURN_SANDBOX_NETWORK_ENABLED and (len(lines) != 2 or not lines[1].startswith('net:[')
+                                                  or lines[1] == os.readlink('/proc/self/ns/net')):
+        raise SandboxUnavailable('The Linux network namespace self-check failed; no engine was started.')
     return {'status': 'available', 'filesystem': 'explicit mounts', 'processes': 'private PID namespace',
-            'network': 'unrestricted'}
+            'network': 'public HTTP(S) gate' if settings.TURN_SANDBOX_NETWORK_ENABLED else 'unrestricted'}
 
 
 if __name__ == '__main__':
@@ -173,5 +197,6 @@ if __name__ == '__main__':
     try:
         print(json.dumps(self_check()))
     except SandboxUnavailable as error:
-        print(json.dumps({'status': 'unavailable', 'reason': str(error), 'network': 'unrestricted'}))
+        print(json.dumps({'status': 'unavailable', 'reason': str(error),
+                          'network': 'unavailable' if settings.TURN_SANDBOX_NETWORK_ENABLED else 'unrestricted'}))
         raise SystemExit(1)
