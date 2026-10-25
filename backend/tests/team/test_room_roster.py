@@ -1,13 +1,22 @@
 """Roster edits preserve history and fence work before changing membership."""
 import asyncio
 import pytest
-from sqlalchemy import select
-from app.db.models import RoomMember, RoomDispatch, Thread
+from sqlalchemy import delete, select
+from app.db.models import Agent, RoomMember, RoomDispatch, Thread
 from app.services import agent_store, session_search, memory_room
 from app.team.service import TeamError
 from tests.services.thread_harness import sessions, owner, cleanup, wait_until  # noqa: F401
 from tests.team.test_collaboration import harness  # noqa: F401
 from tests.team.test_rooms_router import api, make_room  # noqa: F401
+
+
+@pytest.fixture
+async def foreign_owner(sessions, owner):
+    identifier = owner + '-other'
+    yield identifier
+    async with sessions() as db:
+        await db.execute(delete(Agent).where(Agent.owner_id == identifier))
+        await db.commit()
 
 
 def roster(ids, expected, **extra):
@@ -94,11 +103,11 @@ async def test_remove_default_requires_explicit_new_responder(api, harness):
     assert (await api.patch(f"/rooms/{room['id']}", json=body)).status_code == 200
 
 
-async def test_owner_team_and_archived_members_validated(api, harness, sessions, owner):
+async def test_owner_team_and_archived_members_validated(api, harness, sessions, owner, foreign_owner):
     rt, engine, lead, worker = harness
     room = await make_room(api, harness)
     async with sessions() as db:
-        other = await agent_store.create_agent(db, owner_id='other-roster-owner', name='Other')
+        other = await agent_store.create_agent(db, owner_id=foreign_owner, name='Other')
         archived = await agent_store.create_agent(db, owner_id=owner, name='Archived')
         from app.team.service import now
         archived.archived_at = now()
@@ -116,7 +125,13 @@ async def test_owner_team_and_archived_members_validated(api, harness, sessions,
         stored = await db.get(Room, room['id'])
         stored.owner_id = 'another-room-owner'
         await db.commit()
-    assert (await api.patch(f"/rooms/{room['id']}", json=roster([lead.id], [lead.id, worker.id, standalone.id]))).status_code == 404
+    try:
+        assert (await api.patch(f"/rooms/{room['id']}", json=roster([lead.id], [lead.id, worker.id, standalone.id]))).status_code == 404
+    finally:
+        async with sessions() as db:
+            stored = await db.get(Room, room['id'])
+            stored.owner_id = owner
+            await db.commit()
 
 
 async def test_concurrent_edit_refuses_stale_roster(harness):
