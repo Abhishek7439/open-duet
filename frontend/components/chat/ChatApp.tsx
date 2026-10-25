@@ -233,7 +233,7 @@ export function ChatApp() {
       if (document.visibilityState === "hidden") return;
       reportPresence()
         .then((result) => {
-          if (!cancelled && result.open && !window.location.search.match(/[?&](thread|room)=/)) router.push(`/chat?thread=${result.open.thread_id}`);
+          if (!cancelled && result.open && !window.location.search.match(/[?&](thread|room|view|panel)=/)) router.push(`/chat?thread=${result.open.thread_id}`);
         })
         .catch(() => {
           // Not the owner, or an older backend: nothing to show.
