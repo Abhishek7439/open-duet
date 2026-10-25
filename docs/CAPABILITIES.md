@@ -1,6 +1,8 @@
 # Capability and release qualification
 
-Reviewed 2026-10-25 against source `0ffb841`. This table describes source
+Reviewed 2026-10-25 against feature source `6b7fba1` / integrated checkpoint
+`cbc62b7`; baseline `15caa55`. See the [automated verification record](verification/roadmap-next-20261025.md).
+This table describes source
 support. A successful scripted test does not establish real-provider behavior
 or compatibility with an installer. New commits require a new qualification
 record before release.
