@@ -40,9 +40,10 @@ def prepare(agent, thread, turn, *, internal: bool = False) -> str:
         return TRUTH_NOTE + " This request was not saved because it contains text that looks like a secret."
     try:
         before = agent_memory.read_memory(agent.id)
-        if memory_entries.identity(clean) in memory_entries.identities(before.text):
-            return TRUTH_NOTE + " Receipt: this exact fact is already in your private MEMORY.md; no new write was needed."
         day = memory_entries.today()
+        live, _ = memory_entries.without_expired(before.text, day)
+        if memory_entries.identity(clean) in memory_entries.identities(live):
+            return TRUTH_NOTE + " Receipt: this exact fact is already in your private MEMORY.md; no new write was needed."
         lines = before.text.splitlines()
         subject = _SUBJECT.fullmatch(clean)
         # Supersede only a simple, matching first-person subject. Keep all other
@@ -51,7 +52,10 @@ def prepare(agent, thread, turn, *, internal: bool = False) -> str:
             key = subject.group(1).casefold()
             for entry in memory_entries.parse(before.text):
                 previous = _SUBJECT.fullmatch(entry.body)
-                if not entry.struck and previous and previous.group(1).casefold() == key and entry.end == entry.start + 1:
+                if (
+                    not entry.struck and not memory_entries.is_expired(entry, day)
+                    and previous and previous.group(1).casefold() == key and entry.end == entry.start + 1
+                ):
                     lines[entry.start] = f"{entry.prefix}~~{entry.body}~~ · superseded {day}"
         title, _ = agent_memory.redact_secrets(thread.title or "")
         source = memory_entries.source_label(title, thread.id)
@@ -69,10 +73,14 @@ def prepare(agent, thread, turn, *, internal: bool = False) -> str:
                     "do not claim either a complete save or no persistence."
                 )
             return TRUTH_NOTE + " This request was not saved: its change could not be journaled."
+        undo = (
+            "supports Undo in the Notes panel." if row.get("can_undo")
+            else "was recorded, but Undo is unavailable: " + (row.get("reason") or "The earlier version could not be kept.")
+        )
         return TRUTH_NOTE + (
             f" Receipt: the person's literal fact was saved in this agent's private MEMORY.md "
-            f"from thread {thread.id}, turn {turn.id}. Journal change {row['id']} supports Undo "
-            "in the Notes panel. No team memory was changed."
+            f"from thread {thread.id}, turn {turn.id}. Journal change {row['id']} {undo} "
+            "No team memory was changed."
         )
     except (OSError, ValueError, agent_memory.MemoryConflict):
         return TRUTH_NOTE + " This request could not be saved. Report persistence unavailable; do not claim it was remembered."

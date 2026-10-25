@@ -129,3 +129,52 @@ def test_failed_journal_and_rollback_report_ambiguous_persistence(storage, monke
     assert 'may have persisted' in result and 'Undo is unavailable' in result
     assert 'This request was not saved' not in result
     assert 'my favorite color is teal' in agent_memory.read_memory(1).text
+
+
+def test_expired_exact_fact_is_renewed_as_a_live_note(storage, monkeypatch):
+    monkeypatch.setattr(memory_entries, 'today', lambda: '2026-10-25')
+    old = '- 2026-10-01 · my favorite color is teal · until 2026-10-10\n'
+    agent_memory.write_memory(1, old)
+    result = request('Remember that my favorite color is teal')
+    assert 'was saved' in result and 'already in' not in result
+    text = agent_memory.read_memory(1).text
+    assert text.startswith(old)
+    live, expired = memory_entries.without_expired(text, '2026-10-25')
+    assert expired == 1 and live.count('my favorite color is teal') == 1
+    assert '2026-10-25' in live
+    memory_journal.undo(1, memory_journal.read(1)[0]['id'])
+    assert agent_memory.read_memory(1).text == old
+
+
+def test_correction_preserves_expiry_of_conflicting_historical_note(storage, monkeypatch):
+    monkeypatch.setattr(memory_entries, 'today', lambda: '2026-10-25')
+    old = '- 2026-10-01 · my favorite color is teal · until 2026-10-10\n'
+    agent_memory.write_memory(1, old)
+    request('Remember that my favorite color is blue')
+    text = agent_memory.read_memory(1).text
+    assert text.startswith(old)
+    assert 'superseded' not in text
+    live, expired = memory_entries.without_expired(text, '2026-10-25')
+    assert expired == 1 and 'teal' not in live and 'blue' in live
+
+
+def test_existing_secret_is_redacted_and_receipt_reports_undo_unavailable(storage):
+    secret = 'sk-abcdefghijklmnopqrstuvwxyz1234567890'
+    agent_memory.write_atomic(agent_memory.memory_path(1), 'api_key=' + secret + '\n')
+    result = request('Remember that my favorite color is teal')
+    (row,) = memory_journal.read(1)
+    assert row['can_undo'] is False
+    assert 'was saved' in result and 'Undo is unavailable' in result
+    assert row['reason'] in result and 'supports Undo' not in result
+    assert secret not in agent_memory.read_memory(1).text
+    assert secret not in memory_journal.journal_path(1).read_text()
+
+
+def test_oversized_prior_snapshot_receipt_reports_undo_unavailable(storage, monkeypatch):
+    agent_memory.write_memory(1, 'Earlier note is too large for this journal.\n')
+    monkeypatch.setattr(memory_journal, 'BEFORE_MAX_BYTES', 10)
+    result = request('Remember that my favorite color is teal')
+    (row,) = memory_journal.read(1)
+    assert row['can_undo'] is False
+    assert 'Undo is unavailable' in result and row['reason'] in result
+    assert 'supports Undo' not in result

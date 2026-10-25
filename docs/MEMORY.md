@@ -635,9 +635,12 @@ agent's private `MEMORY.md`, never shared team memory.
 
 The note includes the source conversation and turn IDs, and the change appears
 in the existing Notes journal with Undo. Repeating an identical fact does not
-append it again. A new simple `my <subject> is/are <value>` fact supersedes an
+append it again; an expired exact fact is renewed as a new live entry. A new simple `my <subject> is/are <value>` fact supersedes an
 older dated fact with the same subject, preserving the old line struck through;
-Undo restores the earlier notes. More complex corrections still need review in
+Undo restores the earlier notes when the earlier snapshot can be kept safely;
+the receipt reports when Undo is unavailable (for example, earlier secret text
+was redacted). Expired historical entries keep their expiry during a correction.
+More complex corrections still need review in
 the Notes panel. Successful writes and failures produce factual instructions to
 the answering engine; it must distinguish a saved note from conversation recall
 and report an unavailable write instead of claiming it remembered something. An
