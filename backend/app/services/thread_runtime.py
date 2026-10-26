@@ -37,6 +37,7 @@ from app.services import thread_store as store
 from app.services import local_claude_runner
 from app.services.workspaces import require_workspace
 from app.services.codex_login import CodexLogin
+from app.services.claude_login import ClaudeLogin
 from app.services import engine_config
 from app.services.engine_registry import (
     EngineRegistry,
@@ -447,6 +448,7 @@ class ThreadRuntime:
     hub: ThreadHub = default_hub
     adapters: dict[str, ProviderAdapter] = field(default_factory=default_adapters)
     codex_login: CodexLogin = field(default_factory=CodexLogin)
+    claude_login: ClaudeLogin = field(default_factory=ClaudeLogin)
     status_ttl: float = STATUS_CACHE_SECONDS
     instance_id: str = field(default_factory=lambda: uuid4().hex)
     owner_id: str = LOCAL_OWNER_ID
@@ -1457,6 +1459,7 @@ class ThreadRuntime:
         its own turns at once, instead of leaving them for the lease to expire."""
         self._closing = True
         await self.codex_login.close()
+        await self.claude_login.close()
         self.capture.close()
         await self.team_jobs.close()
         runs = list(self._runs.values())

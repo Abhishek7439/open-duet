@@ -178,6 +178,25 @@ defaults (no capabilities, any model, a probe derived from `status()`).
   with a computer to such an engine is refused the same way, and a turn that
   still meets this combination fails with that code.
 
+## Claude web sign-in
+
+With Claude Code installed on the server, choose **Sign in to Claude** in
+Settings → Engines. Open the provider link, sign in with your own account, and
+paste the code shown by the provider page into Settings. The installed,
+unmodified CLI handles authentication. Open Duet passes the code once over its
+private input pipe; it does not save it. Success requires `claude auth status
+--json` to report a signed-in account, and an existing working account is kept.
+
+The initiating owner session alone can read, complete or cancel its flow.
+Browser writes require CSRF; chat-scoped devices cannot access this setup.
+The CLI output is bounded and private; only an HTTPS authorization URL on an
+explicitly allowed provider host is exposed. A five-minute expiry, cancellation
+and backend shutdown stop the child. App sign-ins share a lock in the CLI's
+credential folder, including a configured absolute `CLAUDE_CONFIG_DIR`.
+Sign-in state is process-local: keep Settings open, and use one worker or
+session affinity. Sign-out and account switching still require the server
+terminal. Real-account, Windows and packaged-app flows have not been qualified.
+
 ## Codex
 
 With the Codex CLI installed on the server, choose **Sign in to Codex** in
@@ -195,8 +214,8 @@ home are refused, including across backend processes. A page reload loses the
 in-memory flow handle; wait for expiry before starting again. Browser setup
 requires requests to reach the backend process that started it when using
 multiple workers. This flow does not provide account switching or sign-out.
-Claude's terminal flow is unchanged. Real-account, Windows and packaged-app
-sign-in are not qualified by the automated process and route tests.
+Real-account, Windows and packaged-app sign-in are not qualified by the
+automated process and route tests.
 
 One `codex app-server` per turn: `initialize`, `thread/start` or
 `thread/resume` (Codex's thread id is kept in `provider_state`), `turn/start`,

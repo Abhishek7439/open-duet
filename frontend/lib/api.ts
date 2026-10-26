@@ -565,6 +565,8 @@ export type CodexLoginOperation = {
   error?: string;
 };
 
+export type ClaudeLoginOperation = Omit<CodexLoginOperation, "user_code"> & { code_sent?: boolean };
+
 export type GoogleSetupOperation = {
   id: string;
   kind: "install" | "sign_in" | "models";
@@ -872,6 +874,10 @@ export const api = {
   roomExportUrl: (id: number, format: "md" | "json") => requestBlobUrl(`/rooms/${id}/export?format=${format}`),
   requestTeamLead: (agentId: number) => request<{ id: number; lead_agent_id: number }>("/team/lead", { method: "POST", body: JSON.stringify({ agent_id: agentId }) }),
   getEngines: (refresh = false) => request<Engine[]>(`/engines${refresh ? "?refresh=true" : ""}`),
+  startClaudeEngineLogin: () => request<ClaudeLoginOperation>("/engines/claude/login", { method: "POST" }),
+  claudeLoginStatus: (id: string) => request<ClaudeLoginOperation>(`/engines/claude/login/${encodeURIComponent(id)}`),
+  completeClaudeLogin: (id: string, code: string) => request<void>(`/engines/claude/login/${encodeURIComponent(id)}/code`, { method: "POST", body: JSON.stringify({ code }) }),
+  cancelClaudeLogin: (id: string) => request<void>(`/engines/claude/login/${encodeURIComponent(id)}`, { method: "DELETE" }),
   startCodexLogin: () => request<CodexLoginOperation>("/engines/codex/login", { method: "POST" }),
   codexLoginStatus: (id: string) => request<CodexLoginOperation>(`/engines/codex/login/${encodeURIComponent(id)}`),
   cancelCodexLogin: (id: string) => request<void>(`/engines/codex/login/${encodeURIComponent(id)}`, { method: "DELETE" }),

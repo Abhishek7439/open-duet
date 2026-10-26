@@ -240,3 +240,23 @@ served separately.
 - No email sign-in, no passkeys, no second factor.
 - A paired `admin` device is as powerful as the owner. Pair phones with `chat`
   unless they need settings, and revoke a lost device at once.
+
+
+## Connecting Claude from Settings
+
+An owner can start Claude sign-in under Settings → Engines when its CLI is
+installed. The server runs the CLI's own `auth login` command; only an HTTPS
+sign-in URL on an explicitly allowed provider host is shown. Paste the code
+from that page into Settings. The code is handed to the same child process
+once, never saved or returned in status/error responses. Success requires the
+CLI's JSON `auth status` to confirm a signed-in account. An existing signed-in
+account is preserved.
+
+Start, status, code submission and cancellation are bound to the initiating
+owner session. Browser writes require CSRF protection; chat-scoped paired
+devices cannot access these routes. Each account folder allows one app-managed
+login at a time. Flows expire after five minutes and are stopped during backend
+shutdown. Flow state lives in one backend worker; refreshing Settings loses
+the handle, and multiple workers require session affinity. Signing out and
+switching accounts remain terminal operations. Real-account, Windows and
+installed-app verification have not been run for this flow.

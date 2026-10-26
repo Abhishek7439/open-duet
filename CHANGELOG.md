@@ -4,6 +4,11 @@
 
 ### Added
 
+- Sign in to Claude from Settings using the installed CLI's browser link and
+  pasted authorization code. The starting owner session controls the bounded
+  flow; existing accounts are preserved and codes are submitted once. Real-account,
+  Windows and packaged-app sign-in were not run.
+
 - A version-tagged server image workflow verifies Linux amd64 packaging before
   publishing the tested image to GHCR. A Compose overlay and digest-pinned guide
   support installation without a local build. Registry publication/pull, ARM64,
@@ -11,7 +16,7 @@
 - Start Codex device-code sign-in from Settings, with a bounded process and
   status/code access restricted to the starting owner session. Existing working
   accounts are preserved. Real-account and packaged-app sign-in were not run;
-  Claude sign-in still requires the terminal.
+  Claude account switching and sign-out still require the terminal.
 - Show when a conversation is using a shared screen and require a fresh
   screenshot before coordinate input after tracked control changes. Refused
   inputs are never queued or replayed. Real-provider, Docker desktop and
