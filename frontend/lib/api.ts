@@ -556,6 +556,14 @@ export type EngineConfigInput = {
   context_tokens?: number;
 };
 
+export type CodexLoginOperation = {
+  id: string;
+  phase: "running" | "succeeded" | "failed" | "expired" | "cancelled";
+  authorization_url?: string;
+  user_code?: string;
+  error?: string;
+};
+
 export type GoogleSetupOperation = {
   id: string;
   kind: "install" | "sign_in" | "models";
@@ -863,6 +871,9 @@ export const api = {
   roomExportUrl: (id: number, format: "md" | "json") => requestBlobUrl(`/rooms/${id}/export?format=${format}`),
   requestTeamLead: (agentId: number) => request<{ id: number; lead_agent_id: number }>("/team/lead", { method: "POST", body: JSON.stringify({ agent_id: agentId }) }),
   getEngines: (refresh = false) => request<Engine[]>(`/engines${refresh ? "?refresh=true" : ""}`),
+  startCodexLogin: () => request<CodexLoginOperation>("/engines/codex/login", { method: "POST" }),
+  codexLoginStatus: (id: string) => request<CodexLoginOperation>(`/engines/codex/login/${encodeURIComponent(id)}`),
+  cancelCodexLogin: (id: string) => request<void>(`/engines/codex/login/${encodeURIComponent(id)}`, { method: "DELETE" }),
   startGoogleSetup: (action: "install" | "sign_in" | "models") => request<GoogleSetupOperation>(`/engines/antigravity/setup/${action}`, { method: "POST" }),
   googleSetupStatus: () => request<GoogleSetupOperation | null>("/engines/antigravity/setup/status"),
   cancelGoogleSetup: () => request<void>("/engines/antigravity/setup", { method: "DELETE" }),

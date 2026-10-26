@@ -21,8 +21,9 @@ UI do not know which engine they are talking to.
 
 Open **Settings → Engines** in the web UI or desktop app. **Check again**
 checks installation, login and endpoint readiness. An unavailable engine shows
-its reason without blocking the others. Sign in to Claude or Codex in a terminal;
-Antigravity has its own install and Google sign-in controls below.
+its reason without blocking the others. Sign in to Claude in a terminal; Codex
+has a device-code sign-in button in Settings. Antigravity has its own install
+and Google sign-in controls below.
 
 For ACP, save the command and optional display name. For an OpenAI-compatible
 endpoint, save its base URL (including `/v1` when required), optional default
@@ -178,6 +179,24 @@ defaults (no capabilities, any model, a probe derived from `status()`).
   still meets this combination fails with that code.
 
 ## Codex
+
+With the Codex CLI installed on the server, choose **Sign in to Codex** in
+Settings → Engines. Open the ChatGPT device sign-in link and enter the code.
+Device-code login may need enabling in your ChatGPT security settings. Existing
+working CLI logins are kept. The app confirms success with `codex login status`;
+it never returns the CLI output or credentials. The account stays in the CLI's
+usual home (including a configured `CODEX_HOME`), available to server-side runs.
+
+Only the admin browser/device session that starts a flow can read its code or
+cancel it. Codes are not broadcast as chat events. The process has a five-minute
+limit, a shorter deadline to produce its code, bounded output, and is stopped
+on Cancel or backend shutdown. Competing app sign-ins for the same credential
+home are refused, including across backend processes. A page reload loses the
+in-memory flow handle; wait for expiry before starting again. Browser setup
+requires requests to reach the backend process that started it when using
+multiple workers. This flow does not provide account switching or sign-out.
+Claude's terminal flow is unchanged. Real-account, Windows and packaged-app
+sign-in are not qualified by the automated process and route tests.
 
 One `codex app-server` per turn: `initialize`, `thread/start` or
 `thread/resume` (Codex's thread id is kept in `provider_state`), `turn/start`,

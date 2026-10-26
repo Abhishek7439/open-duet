@@ -8,6 +8,10 @@
   publishing the tested image to GHCR. A Compose overlay and digest-pinned guide
   support installation without a local build. Registry publication/pull, ARM64,
   real providers and VPS/TLS operation were not run.
+- Start Codex device-code sign-in from Settings, with a bounded process and
+  status/code access restricted to the starting owner session. Existing working
+  accounts are preserved. Real-account and packaged-app sign-in were not run;
+  Claude sign-in still requires the terminal.
 
 - Save as skill now prepares a bounded, redacted draft from a successful chat
   turn's request and result, with source provenance and editable workflow sections.

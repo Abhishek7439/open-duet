@@ -175,3 +175,50 @@ async def antigravity_callback(request: Request, rt: ThreadRuntime = Depends(get
         await _antigravity(rt).complete_callback(operation_id, callback)
     except (ValueError, OSError, TypeError, KeyError):
         raise _error(422, "invalid_google_callback", "This sign-in response is invalid or expired. Start sign-in again.") from None
+
+
+def _login_owner(request: Request) -> str:
+    from app.auth.middleware import principal_of
+
+    principal = principal_of(request.scope)
+    if principal is None or not principal.is_admin:
+        raise _error(403, "admin_required", "Sign in as the owner to connect an engine.")
+    return f"{principal.kind}:{principal.session_id}"
+
+
+@router.post("/codex/login", status_code=202)
+async def start_codex_login(request: Request, response: Response, rt: ThreadRuntime = Depends(get_runtime)):
+    from app.services.codex_adapter import resolve_codex_executable
+    from app.services.codex_login import LoginError
+
+    owner = _login_owner(request)
+    response.headers["Cache-Control"] = "no-store"
+    if rt._closing or "codex" not in rt.adapters:
+        raise _error(409, "engine_unavailable", "Codex is unavailable on this server.")
+    executable = resolve_codex_executable()
+    if executable is None:
+        raise _error(409, "engine_unavailable", "Install the Codex CLI on the server first.")
+    try:
+        return await rt.codex_login.start(owner, executable)
+    except (LoginError, OSError):
+        raise _error(409, "login_unavailable", "Codex sign-in is busy or its account folder is unavailable. Finish any pending sign-in and try again.") from None
+
+
+@router.get("/codex/login/{flow_id}")
+async def codex_login_status(flow_id: str, request: Request, response: Response, rt: ThreadRuntime = Depends(get_runtime)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        result = rt.codex_login.view(_login_owner(request), flow_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Sign-in not found") from None
+    if result["phase"] == "succeeded":
+        rt.engines.forget("codex")
+    return result
+
+
+@router.delete("/codex/login/{flow_id}", status_code=204)
+async def cancel_codex_login(flow_id: str, request: Request, rt: ThreadRuntime = Depends(get_runtime)):
+    try:
+        await rt.codex_login.cancel(_login_owner(request), flow_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Sign-in not found") from None

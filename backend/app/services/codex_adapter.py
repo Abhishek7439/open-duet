@@ -207,7 +207,7 @@ class CodexAdapter:
     setup = {
         "install": "npm install -g @openai/codex", "sign_in": "codex login",
         "credential": "terminal", "docs_url": "https://developers.openai.com/codex/cli/",
-        "notes": ["Install the CLI and sign in from a terminal, then check again."],
+        "notes": ["Install the CLI, then sign in here with a ChatGPT device code or use the terminal command."],
     }
     key = "codex"
     label = "Codex"
@@ -268,7 +268,7 @@ class CodexAdapter:
                 ready=False,
                 version=number,
                 signed_in=signed_in,
-                reason="Codex is not signed in. Run `codex login` in a terminal first."
+                reason="Codex is not signed in. Use Sign in to Codex in Settings, or run `codex login` in a terminal."
                 if signed_in is False
                 else "Could not tell whether Codex is signed in.",
             )

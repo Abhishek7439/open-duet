@@ -242,7 +242,15 @@ It prints a full link when `OPEN_DOTS_PUBLIC_URL` is set. A code works once and 
 
 ## Engines
 
-Connect engines in **Settings → Engines**. Saved keys are encrypted. CLI browser sign-in runs from a terminal as the account running Open Duet; use API keys on headless servers. OpenRouter and OpenAI-compatible endpoints need no CLI.
+Connect engines in **Settings → Engines**. Saved keys are encrypted. With Codex
+installed on the server, **Sign in to Codex** starts a device-code flow bound to
+the owner session that started it; open the displayed page on your own device
+and enter its code. The operation expires after five minutes and can be
+cancelled. Real-account and packaged sign-in remain unqualified. Other CLI
+browser sign-ins, including Claude, still run from a terminal as the account
+running Open Duet; API keys are another option on headless servers. OpenRouter
+and OpenAI-compatible endpoints need no CLI. See [ENGINES.md](ENGINES.md) for
+the device flow's account, restart and worker limitations.
 
 - **Direct install:** install the CLI as `opendots` (see [ENGINES.md](ENGINES.md)), then `claude auth login` or `codex login --device-auth`. A service has a short `PATH`; the server also looks in `~/.local/bin`, `~/.npm-global/bin` and `/usr/local/bin`, and `OPEN_DOTS_EXTRA_PATH` adds more folders.
 - **Docker:** the image carries no engine and no credentials. To add one, name its package when you build, for example `OPEN_DOTS_ENGINES="@anthropic-ai/claude-code" docker compose build`, then sign in inside the container: `docker compose exec -it open-dots claude auth login`. The sign-in is kept in the data volume. Installing a CLI into a running container is lost when it is recreated; rebuild with `OPEN_DOTS_ENGINES` instead.

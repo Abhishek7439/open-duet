@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Engine, type EngineConfigField } from "@/lib/api";
 import { ENDPOINT_TEMPLATES, engineConfig, engineDraft, engineGroups } from "@/lib/engines";
+import { CodexEngineSetup } from "./CodexEngineSetup";
 import { GoogleEngineSetup } from "./GoogleEngineSetup";
 
 const FIELD = "mt-1 w-full rounded-md border border-line bg-transparent px-3 py-2 text-sm";
@@ -84,6 +85,7 @@ export function EngineSettings({ onEnginesChanged }: { onEnginesChanged?: (engin
       return <article key={engine.id} className="min-w-0 space-y-3 rounded-md border border-line p-4">
         <div className="flex flex-wrap items-center gap-2"><h5 className="font-medium">{engine.label}</h5><span className={`rounded px-2 py-0.5 text-xs ${engine.available ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{engine.available ? "Ready" : "Needs setup"}</span>{engine.version && <span className="text-xs text-muted">{engine.version}</span>}</div>
         {!engine.available && <p className="break-words text-xs text-muted">{engine.reason}</p>}
+        {engine.id === "codex" && engine.installed && <CodexEngineSetup onChanged={() => setRefresh((n) => n + 1)} />}
         {engine.id === "antigravity" && <GoogleEngineSetup engine={engine} onChanged={() => {
           setDrafts((previous) => { const next = { ...previous }; delete next.antigravity; return next; });
           setRefresh((n) => n + 1);
