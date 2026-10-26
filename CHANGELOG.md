@@ -64,6 +64,10 @@
 
 ### Fixed
 
+- Resolve the Python interpreter's real path before launching the Linux network
+  sandbox bridge. Custom Python runtimes still need an explicit read-only grant;
+  provider sessions, stop/timeouts and orphan cleanup were not run.
+
 - Concurrent Today refreshes and first visits serialize their state and publish
   one card and notification. A failed publication rolls back its new chat too.
 

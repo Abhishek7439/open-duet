@@ -401,7 +401,12 @@ agent folder stays hidden; the backend still answers that agent's memory tools
 through the mounted mailbox.
 
 Custom runtime installations outside standard system paths need explicit
-comma-separated `TURN_SANDBOX_READONLY_PATHS` entries. Additional account files
+comma-separated `TURN_SANDBOX_READONLY_PATHS` entries. For managed Python,
+grant the real base runtime directory reported by
+`python -c 'import pathlib, sys; print(pathlib.Path(sys.base_prefix).resolve())'`.
+The network bridge resolves its interpreter symlink before entering the box;
+it does not automatically grant the runtime or its parent directory.
+Additional account files
 (such as Claude's `~/.claude.json`) and ACP account directories can be granted
 with `TURN_SANDBOX_WRITABLE_PATHS`. Grant the narrowest path: a whole HOME,
 filesystem root or application data parent is rejected. These are trusted owner

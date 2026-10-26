@@ -225,6 +225,17 @@ def test_network_plan_has_no_host_tcp_listener_or_bypass_environment(network_box
         assert command[index - 1] == '--unsetenv'
 
 
+def test_network_bridge_resolves_python_alias_without_changing_host_launch(monkeypatch, network_box):
+    interpreter = Path(sys.executable).resolve(strict=True)
+    alias = network_box / 'python-alias'
+    alias.symlink_to(interpreter)
+    monkeypatch.setattr(box.sys, 'executable', str(alias))
+    command = box.command(['codex', 'app-server'], cwd=network_box, env={})
+    assert command[0] == str(alias)
+    bridge = command.index('bridge')
+    assert command[bridge - 2] == str(interpreter)
+
+
 @pytest.mark.parametrize('network', ['net:[host]', '', 'pid:[other]'])
 def test_self_check_refuses_shared_or_missing_network_namespace(monkeypatch, network_box, network):
     monkeypatch.setattr(box.os, 'readlink', lambda name: 'net:[host]' if name.endswith('/net') else 'pid:[host]')
@@ -292,7 +303,7 @@ with open(result_file, "w", encoding="utf-8") as result:
     result.write("host loopback blocked; private proxy destination refused")
 print("host loopback blocked; private proxy destination refused")
 '''
-        args = box.command([sys.executable, '-c', script, str(host_port), str(result_file)], cwd=real_network_box,
+        args = box.command([str(Path(sys.executable).resolve(strict=True)), '-c', script, str(host_port), str(result_file)], cwd=real_network_box,
                            env={'PATH': '/usr/bin:/bin'})
         scratch = Path('/tmp')
         before = set(scratch.glob('duet-egress-*'))
