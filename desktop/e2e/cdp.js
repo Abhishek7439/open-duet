@@ -12,9 +12,10 @@ async function listTargets(port) {
 }
 
 // The first page of the app whose address starts with `prefix`.
-async function waitForPage(port, prefix, timeoutMs = 120_000) {
+async function waitForPage(port, prefix, timeoutMs = 120_000, checkLaunch = () => {}) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
+    checkLaunch();
     try {
       const page = (await listTargets(port)).find((t) => t.type === "page" && t.url.startsWith(prefix));
       if (page) return page;
@@ -26,26 +27,50 @@ async function waitForPage(port, prefix, timeoutMs = 120_000) {
   throw new Error(`no page starting with ${prefix} within ${timeoutMs} ms`);
 }
 
-async function attach(target) {
+async function attach(target, { timeoutMs = 10_000 } = {}) {
   const socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
+    const timer = setTimeout(() => {
+      reject(new Error("DevTools connection timed out."));
+      socket.close();
+    }, timeoutMs);
+    socket.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
+    socket.addEventListener("error", (error) => { clearTimeout(timer); reject(error); }, { once: true });
+    socket.addEventListener("close", () => { clearTimeout(timer); reject(new Error("DevTools connection closed.")); }, { once: true });
   });
   let counter = 0;
   const waiting = new Map();
+  const rejectPending = () => {
+    for (const pending of waiting.values()) pending.reject(new Error("DevTools connection closed."));
+    waiting.clear();
+  };
+  socket.addEventListener("close", rejectPending);
+  socket.addEventListener("error", rejectPending);
   socket.addEventListener("message", (message) => {
     const data = JSON.parse(message.data);
     if (data.id && waiting.has(data.id)) {
-      waiting.get(data.id)(data);
+      waiting.get(data.id).reply(data);
       waiting.delete(data.id);
     }
   });
   const send = (method, params = {}) =>
     new Promise((resolve, reject) => {
       const id = ++counter;
-      waiting.set(id, (reply) => (reply.error ? reject(new Error(`${method}: ${reply.error.message}`)) : resolve(reply.result)));
-      socket.send(JSON.stringify({ id, method, params }));
+      const timer = setTimeout(() => {
+        waiting.delete(id);
+        reject(new Error(`${method}: DevTools request timed out.`));
+      }, 30_000);
+      const fail = (error) => { clearTimeout(timer); reject(error); };
+      waiting.set(id, {
+        reject: fail,
+        reply: (reply) => {
+          clearTimeout(timer);
+          if (reply.error) reject(new Error(`${method}: ${reply.error.message}`));
+          else resolve(reply.result);
+        },
+      });
+      try { socket.send(JSON.stringify({ id, method, params })); }
+      catch (error) { waiting.delete(id); fail(error); }
     });
 
   const evaluate = async (expression) => {

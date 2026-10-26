@@ -1,7 +1,7 @@
 // Starts the real desktop app for a test: the same main.js, the same backend, with
 // a data folder of the test's choosing and a DevTools port to look at the window.
 
-const { spawn, spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
@@ -9,6 +9,7 @@ const path = require("node:path");
 const { layout } = require("../src/paths");
 const { findElectronBinary } = require("../src/preflight");
 const { waitForPage, attach, sleep } = require("./cdp");
+const { terminate } = require("./processes");
 
 const paths = layout();
 
@@ -66,16 +67,26 @@ async function launchApp({ dataDir, env = {}, mode = "start", viaScript = false,
     ? spawn(process.execPath, [path.join(paths.desktop, "scripts", "launch.js"), mode, flag], {
         env: environment,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
       })
     : spawn(binary, [entry, `--mode=${mode}`, flag], {
         env: environment,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
       });
   const output = [];
   child.stdout.on("data", (chunk) => output.push(chunk.toString()));
   child.stderr.on("data", (chunk) => output.push(chunk.toString()));
   let exitCode;
-  const exited = new Promise((resolve) => child.once("exit", (code) => ((exitCode = code), resolve(code))));
+  let launchError;
+  const exited = new Promise((resolve) => {
+    child.once("exit", (code) => ((exitCode = code), resolve(code)));
+    child.once("error", (error) => {
+      launchError = error;
+      exitCode = 1;
+      resolve(1);
+    });
+  });
 
   const app = {
     child,
@@ -92,7 +103,10 @@ async function launchApp({ dataDir, env = {}, mode = "start", viaScript = false,
     async page({ timeoutMs = 180_000 } = {}) {
       let target;
       try {
-        target = await waitForPage(debugPort, "http://127.0.0.1:", timeoutMs);
+        target = await waitForPage(debugPort, "http://127.0.0.1:", timeoutMs, () => {
+          if (launchError) throw launchError;
+          if (exitCode !== undefined) throw new Error(`Electron exited before loading the page (${exitCode}).`);
+        });
       } catch (error) {
         throw new Error(`${error.message}\n${output.join("").slice(-3000)}`);
       }
@@ -111,15 +125,19 @@ async function launchApp({ dataDir, env = {}, mode = "start", viaScript = false,
 
     // Ends only Electron's main process, as a crash or a kill would. Not its children.
     hardKill() {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/F"], { windowsHide: true });
+      if (child.pid) terminate(child.pid, { tree: false });
       return exited;
     },
 
     // Ends everything this launch started (for cleaning up after a test).
     destroy() {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
-      const pid = backendPid(dataDir);
-      if (pid && alive(pid)) spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
+      if (child.pid) terminate(child.pid);
+      // Windows taskkill needs the separately surviving backend after a crash.
+      // On POSIX it inherits the launch's dedicated process group.
+      if (process.platform === "win32") {
+        const pid = backendPid(dataDir);
+        if (pid && alive(pid)) terminate(pid);
+      }
     },
   };
   return app;

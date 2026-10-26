@@ -8,6 +8,11 @@
   pasted authorization code. The starting owner session controls the bounded
   flow; existing accounts are preserved and codes are submitted once. Real-account,
   Windows and packaged-app sign-in were not run.
+- Run an isolated desktop source smoke check on macOS, Windows or Linux, and
+  check unpacked Windows/macOS apps with the packaged smoke command. Both use
+  disposable profiles; failed packaged checks now stop their launched processes.
+  The macOS arm64 source window passed startup, access checks and restart.
+  Installed artifacts and Windows/Linux execution were not run.
 
 - A version-tagged server image workflow verifies Linux amd64 packaging before
   publishing the tested image to GHCR. A Compose overlay and digest-pinned guide
