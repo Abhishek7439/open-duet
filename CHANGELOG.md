@@ -9,6 +9,9 @@
   pending sign-in and active or starting conversations, bounds CLI execution,
   and verifies sign-out without exposing provider output. Real-account,
   Windows and packaged-app switching were not run.
+- Add a real Linux network sandbox integration check for host loopback denial,
+  private-destination proxy refusal and gate cleanup. Linux enforcement was not
+  run on this macOS host; the check requires bubblewrap and namespace support.
 
 - Sign in to Claude from Settings using the installed CLI's browser link and
   pasted authorization code. The starting owner session controls the bounded
