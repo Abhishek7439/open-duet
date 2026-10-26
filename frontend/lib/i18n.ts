@@ -26,6 +26,7 @@ export const en = {
   "sidebar.showArchived": "Show archived",
   "sidebar.hideArchived": "Hide archived",
   "sidebar.routines": "Routines",
+  "sidebar.legacyTasks": "Telegram & Boat tasks",
   "sidebar.settings": "Settings",
   "sidebar.rowActions": "Conversation actions",
   "sidebar.rename": "Rename",

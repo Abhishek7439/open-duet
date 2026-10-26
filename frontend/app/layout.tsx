@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Open Duet",
-  description: "Connect Telegram and Claude, then submit a task.",
+  description: "A workspace of AI agents that work on your computer.",
 };
 
 // Lets pages use the full phone screen; the shell pads for the notch with safe-area insets.

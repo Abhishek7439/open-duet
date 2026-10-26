@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, CalendarClock, Columns3, Plus, Settings, SlidersHorizontal, Trash2, Crown } from "lucide-react";
+import { Archive, CalendarClock, Columns3, Plus, Send, Settings, SlidersHorizontal, Trash2, Crown } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import type { Agent, Thread } from "@/lib/api";
@@ -226,6 +226,10 @@ export function Sidebar({
             <span className="font-medium">{t("sidebar.routines")}</span>
           </button>
         )}
+        <Link href="/tasks/" className={cn(ROW, "hover:bg-hover/60")}>
+          <Send size={18} aria-hidden="true" className="shrink-0 text-muted" />
+          <span className="font-medium">{t("sidebar.legacyTasks")}</span>
+        </Link>
         <div className="flex items-center gap-1">
           <Link href="/settings/" className={cn(ROW, "flex-1 hover:bg-hover/60")}>
             <Settings size={18} aria-hidden="true" className="shrink-0 text-muted" />

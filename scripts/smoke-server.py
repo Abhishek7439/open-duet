@@ -207,7 +207,7 @@ def refuses_public_bind(server: Server) -> None:
 
 @check("the pages load without signing in; a missing page is a 404")
 def pages_load(server: Server) -> None:
-    for path in ("/", "/login/", "/pair/", "/chat/", "/settings/"):
+    for path in ("/", "/login/", "/pair/", "/chat/", "/settings/", "/tasks/"):
         response = server.client.get(path, headers=PROXY)
         assert response.status_code == 200 and "text/html" in response.headers["content-type"], (path, response.status_code)
     assert server.client.get("/no-such-page/", headers=PROXY).status_code == 404
