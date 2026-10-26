@@ -4,6 +4,11 @@
 
 ### Added
 
+- A version-tagged server image workflow verifies Linux amd64 packaging before
+  publishing the tested image to GHCR. A Compose overlay and digest-pinned guide
+  support installation without a local build. Registry publication/pull, ARM64,
+  real providers and VPS/TLS operation were not run.
+
 - Save as skill now prepares a bounded, redacted draft from a successful chat
   turn's request and result, with source provenance and editable workflow sections.
   Explicit reviewed saves create a new disabled skill; revision-bound Undo refuses

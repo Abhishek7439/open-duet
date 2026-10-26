@@ -9,7 +9,7 @@ There are two ways to run it. Both use the same server, the same settings and th
 | What you install | Docker | Node.js 22, [uv](https://docs.astral.sh/uv/), a service account |
 | HTTPS | nginx or Caddy overlay included | a proxy you set up on the host |
 | Runs as a service | `restart: unless-stopped` | a systemd unit the server writes for you |
-| Updates | rebuild the image | pull, rebuild the pages, restart |
+| Updates | rebuild, or pull a published image | pull, rebuild the pages, restart |
 
 > **Status: experimental.** What was run, and what was not, is listed in [What has been checked](#what-has-been-checked). Read it before you rely on this for anything that matters.
 
@@ -74,6 +74,54 @@ Needs Docker with the Compose plugin. The app listens only on the host's loopbac
 The container has no access to the host's Docker, so agent computers ([COMPUTERS.md](COMPUTERS.md)) are not available in this route; use the direct install if you need them.
 
 Data lives in the Docker volume `open-dots_data` (the container's `/data`). Update with `git pull`, then `docker compose build` and `up -d` again with the same `-f` files; the database is updated when the container starts, and a SQLite file is copied aside first.
+
+### Use a published server image
+
+The **Server image** workflow builds and tests a Linux **amd64** image when a
+version tag is pushed. It publishes the exact tested image to
+`ghcr.io/anil-matcha/open-duet` with version (`vX.Y.Z`) and full source
+(`sha-<commit>`) tags. Manual branch runs only build and test by default;
+publishing manually requires selecting a version tag and checking **publish**.
+There is no moving `latest` tag. An existing desktop release does not imply a
+server image exists for it: select a successful Server image run and use the
+digest printed in its summary. Package visibility must be public in GitHub's
+package settings for anonymous pulls; otherwise authenticate to GHCR first.
+
+No image publication or registry pull has been verified for this increment.
+Until a successful publishing run exists, use the source-build steps above.
+
+With Docker Compose **2.24.4 or newer**, use the image overlay after the base
+file. It removes the build recipe and requires an explicit image. Start with
+the code checkout and private `open-dots.env` from Route 1; set a digest from
+the workflow summary (replace the placeholder), then generate the key:
+
+```sh
+export OPEN_DOTS_IMAGE='ghcr.io/anil-matcha/open-duet@sha256:<digest-from-run-summary>'
+touch open-dots.env && chmod 600 open-dots.env
+docker compose -f compose.yaml -f deploy/compose.image.yaml pull open-dots
+KEY=$(docker compose -f compose.yaml -f deploy/compose.image.yaml run --rm --no-deps --entrypoint python open-dots -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+printf 'TOKEN_ENCRYPTION_KEYS=%s\nLOCAL_EXECUTION_ENABLED=true\nOPEN_DOTS_PUBLIC_URL=https://dots.example.com\n' "$KEY" > open-dots.env
+export OPEN_DOTS_DOMAIN=dots.example.com
+docker compose -f compose.yaml -f deploy/compose.image.yaml -f deploy/proxy/compose.caddy.yaml up -d --no-build
+```
+
+Run Route 1's passphrase and doctor commands afterwards. Keep the same `-f`
+files for every Compose command, including `exec`, backup and updates. You
+can substitute the nginx overlay or omit a proxy overlay when the proxy runs
+elsewhere, as described above. Never regenerate the key on an existing install.
+
+The published image contains **no engine CLIs and no credentials**. Use an
+OpenRouter or OpenAI-compatible connection in Settings, or build your own
+image with `OPEN_DOTS_ENGINES` using Route 1. That build setting has no effect
+on a pulled image. The image workflow checks server packaging with scripted
+engines; it does not qualify a real provider, ARM64, a VPS reboot or public TLS.
+
+To update, first back up the data and encryption key, choose a new digest,
+change `OPEN_DOTS_IMAGE`, and repeat `pull` and `up -d --no-build` with the
+same overlays. The volume is retained, and migration runs at startup. Tags
+can be replaced by a later publishing run; a digest pins the bytes you
+reviewed. A previous image digest alone cannot undo a database migration:
+restore a compatible backup into an empty data volume when rolling back.
 
 ## Route 2: direct install with systemd
 

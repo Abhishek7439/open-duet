@@ -1,0 +1,95 @@
+name: Server image
+
+# A manual branch run verifies packaging without publishing. Push a version tag
+# to publish, or dispatch on that tag with publish=true to recover a missed run.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the tested image (version tags only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Build and verify Linux amd64 image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v5.4.2
+      - name: Build without engine packages or credentials
+        run: docker build --platform linux/amd64 --build-arg ENGINES= -t open-dots:smoke .
+      - run: uv sync --frozen
+        working-directory: backend
+      - name: Verify packaging, fresh boot, upgrade, backup and restart
+        run: uv run python ../scripts/smoke-docker.py --skip-build --skip-engine-build
+        working-directory: backend
+      - name: Save the exact tested image
+        if: github.event_name == 'push' || inputs.publish
+        run: docker save open-dots:smoke -o /tmp/server-image.tar
+      - uses: actions/upload-artifact@v4.6.2
+        if: github.event_name == 'push' || inputs.publish
+        with:
+          name: server-image
+          path: /tmp/server-image.tar
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    name: Publish tested image to GHCR
+    needs: verify
+    if: github.event_name == 'push' || inputs.publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Require a version tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          test "$REF_TYPE" = tag
+          [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: server-image
+          path: /tmp
+      - uses: docker/login-action@v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push version and source tags, record the digest
+        env:
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${REPOSITORY,,}"
+          docker load -i /tmp/server-image.tar
+          docker tag open-dots:smoke "$image:$VERSION"
+          docker tag open-dots:smoke "$image:sha-$SOURCE_SHA"
+          docker push "$image:$VERSION"
+          docker push "$image:sha-$SOURCE_SHA"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$image:$VERSION")
+          {
+            echo '### Server image (Linux amd64)'
+            echo "Version: \`$image:$VERSION\`"
+            echo "Source: \`$SOURCE_SHA\`"
+            echo "Pin this digest: \`$digest\`"
+            echo 'No engine packages or credentials are included. ARM64 and real-provider use are not qualified by this workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"

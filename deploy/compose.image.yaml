@@ -1,0 +1,8 @@
+# Use with compose.yaml; requires Docker Compose 2.24.4 or newer for !reset.
+# OPEN_DOTS_IMAGE must name a published version or digest (see SELF-HOSTING.md).
+# Existing data, settings, network and proxy overlays are preserved.
+services:
+  open-dots:
+    build: !reset null
+    image: ${OPEN_DOTS_IMAGE:?set OPEN_DOTS_IMAGE to a published version or digest}
+    pull_policy: always
