@@ -4,8 +4,8 @@
 
 ### Added
 
-- Require the real Linux filesystem and network sandbox checks in backend CI,
-  with bubblewrap installed and skipped checks treated as failures. The new CI
+- Require the real Linux filesystem and network sandbox checks in backend CI on
+  Ubuntu 22.04, with bubblewrap installed and skipped checks treated as failures. The new CI
   job and real Linux enforcement were not run locally on this macOS host;
   provider sessions and stop/orphan cleanup still need separate qualification.
 

@@ -194,7 +194,9 @@ def real_network_box(monkeypatch, tmp_path):
     """Enable the real Linux sandbox without platform or executable fakes."""
     monkeypatch.setattr(settings, 'TURN_SANDBOX_ENABLED', True)
     monkeypatch.setattr(settings, 'TURN_SANDBOX_NETWORK_ENABLED', True)
-    monkeypatch.setattr(settings, 'TURN_SANDBOX_READONLY_PATHS', '')
+    # A venv can link to a managed Python outside /usr. Grant only that runtime,
+    # as an operator must for a custom installation; never grant its parent/home.
+    monkeypatch.setattr(settings, 'TURN_SANDBOX_READONLY_PATHS', str(Path(sys.base_prefix).resolve()))
     monkeypatch.setattr(settings, 'TURN_SANDBOX_WRITABLE_PATHS', '')
     monkeypatch.setattr(settings, 'SQLITE_PATH', str(tmp_path / 'data' / 'app.db'))
     workspace = tmp_path / 'workspace'
