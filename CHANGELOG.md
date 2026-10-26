@@ -12,6 +12,10 @@
   status/code access restricted to the starting owner session. Existing working
   accounts are preserved. Real-account and packaged-app sign-in were not run;
   Claude sign-in still requires the terminal.
+- Show when a conversation is using a shared screen and require a fresh
+  screenshot before coordinate input after tracked control changes. Refused
+  inputs are never queued or replayed. Real-provider, Docker desktop and
+  installed-app handoff checks were not run.
 
 - Save as skill now prepares a bounded, redacted draft from a successful chat
   turn's request and result, with source provenance and editable workflow sections.

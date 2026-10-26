@@ -264,8 +264,15 @@ without computers the button explains that and nothing else changes.
   config (host key accepted by hand first, connection sharing and short
   timeouts, no ports published on the server). The bind mount would then be a
   folder on the server, not the local workspace.
-- A screen queue across conversations. Desktop and browser input currently
-  refuse another conversation while its screen ownership lease is active.
+- Automatic screen queues across conversations. The Computer panel shows when a
+  conversation is using the screen. Desktop and browser calls refuse competing
+  conversations while the screen lease is active; refused calls are consumed,
+  never queued or replayed. Coordinate input after contention, person takeover,
+  or another conversation's tracked screen/browser action requires a fresh screenshot before the
+  agent decides its next action. A screenshot observed before the change does
+  not satisfy that check. Structured browser refs keep their separate freshness
+  checks. Real-provider, Docker desktop and installed-app qualification of this
+  handoff behavior has not been run.
 - Other providers than Claude and Codex: the computer reaches a turn through an
   MCP server, which another provider adapter could mount the same way once it
   can switch off its own host tools (Codex does: see [ENGINES.md](ENGINES.md#codex)).

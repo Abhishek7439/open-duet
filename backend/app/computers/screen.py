@@ -12,6 +12,12 @@ from app.computers import docker_cli, grants
 WIDTH, HEIGHT = 1280, 800
 INPUT_NAMES = frozenset({"click", "double_click", "move", "drag", "type", "key", "scroll"})
 _KEY = re.compile(r"^[A-Za-z0-9_+\-]{1,60}( [A-Za-z0-9_+\-]{1,60}){0,9}$")
+BUSY_REFUSAL = (
+    "Another conversation is using this screen. This call was not run or queued. "
+    "Tell the person you are waiting. Once the screen is free, take a fresh screenshot "
+    "and decide your next action again; do not replay the refused input."
+)
+FRESH_REFUSAL = "The screen changed or was busy. This input was not run. Take a fresh screenshot and decide the action again."
 CONTROL_REFUSAL = (
     "The person has taken control of this computer, so this call was not run. "
     "Do not retry now. Stop and tell them you are waiting, then take a fresh screenshot "
@@ -107,24 +113,33 @@ class Screen:
     def __init__(self, server, turn_id: str, max_actions=300):
         self.server, self.turn_id, self.max_actions = server, turn_id, max_actions
         self.actions, self.last_input, self.last_capture = 0, 0.0, 0.0
+        self.observed_epoch = 0
+        self.needs_observation = False
 
     def run(self, name: str, args: dict) -> dict:
         from app.computers.mcp_server import _text
         s = self.server
         with driver_lock(s.state_dir):
             if held(s.state_dir):
+                self.needs_observation = True
                 return _text(CONTROL_REFUSAL, error=True)
+            owner_path = s.state_dir / "screen-owner.json"
+            owner = read_state(owner_path)
+            if owner.get("until", 0) > time.time() and owner.get("turn_id") != self.turn_id:
+                self.needs_observation = True
+                return _text(BUSY_REFUSAL, error=True)
+            epoch = read_state(s.state_dir / "screen-epoch.json").get("at", 0)
             if name in INPUT_NAMES:
                 if self.actions >= self.max_actions:
                     return _text("This turn reached its screen action limit.", error=True)
-                owner_path = s.state_dir / "screen-owner.json"
-                owner = read_state(owner_path)
-                if owner.get("until", 0) > time.time() and owner.get("turn_id") != self.turn_id:
-                    return _text("Another conversation is using this screen. Wait until it finishes.", error=True)
+                if self.needs_observation or epoch != self.observed_epoch:
+                    return _text(FRESH_REFUSAL, error=True)
                 write_state(owner_path, {"turn_id": self.turn_id, "until": time.time()+60})
                 time.sleep(max(0, .15-(time.monotonic()-self.last_input)))
                 self.actions += 1
-                write_state(s.state_dir / "browser-epoch.json", {"at": time.time_ns()})
+                self.observed_epoch = time.time_ns()
+                write_state(s.state_dir / "screen-epoch.json", {"at": self.observed_epoch})
+                write_state(s.state_dir / "browser-epoch.json", {"at": self.observed_epoch})
                 self.last_input = time.monotonic()
             if name == "wait":
                 time.sleep(args["seconds"])
@@ -145,6 +160,8 @@ class Screen:
             if name == "screenshot":
                 if not done.raw.startswith(b"\x89PNG\r\n\x1a\n"):
                     return _text("The screen returned an invalid image.", error=True)
+                self.observed_epoch = epoch
+                self.needs_observation = False
                 return {"content": [{"type": "text", "text": f"screen {WIDTH}x{HEIGHT}"}, {"type": "image", "mimeType": "image/png", "data": base64.b64encode(done.raw).decode()}]}
             return _text(f"{name}: {subject}")
 

@@ -103,6 +103,7 @@ def respond(
         guest_workspace=docker_cli.GUEST_WORKSPACE,
         container_id=computer.container_id,
         busy=service.busy(computer.id),
+        screen_busy=computer.kind == "desktop" and service.screen_busy(computer.id),
         desktop_ready=bool(status and status.desktop_ready),
         last_used_at=computer.last_used_at,
         last_command=LastCommandResponse(**{k: v for k, v in last.items() if k in LastCommandResponse.model_fields}) if last else None,

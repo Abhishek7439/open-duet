@@ -215,6 +215,7 @@ function DockerComputerView({
       <div className="rounded-md border border-line p-3">
         <p className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{computerStateLabel(state)}</span>
+          {computer.screen_busy && <span role="status" className="text-xs text-muted">A conversation is using the screen. Other chats must wait, then take a fresh screenshot. Refused input is never queued.</span>}
           {computer.busy && <span className="rounded bg-hover px-1.5 text-xs">in use by a turn</span>}
           <span className="font-mono text-xs text-muted" title={computer.image}>
             {imageLabel(computer.image)}

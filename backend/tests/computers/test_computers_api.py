@@ -188,3 +188,20 @@ async def test_remote_callers_are_refused(api, rt):  # noqa: F811
     transport = httpx.ASGITransport(app, client=("203.0.113.9", 50000))
     async with httpx.AsyncClient(transport=transport, base_url="http://example.com") as remote:
         assert (await remote.get("/api/v1/computers/health")).status_code in (403, 404)
+
+
+async def test_screen_busy_status_expires_without_exposing_private_owner(api, rt):
+    from app.computers import screen
+    import time
+    agent = await new_agent(api)
+    created = await api.post(f"/api/v1/agents/{agent['id']}/computer", json={"kind": "desktop"})
+    computer = created.json()
+    path = f"/api/v1/computers/{computer['id']}"
+    assert not computer["screen_busy"]
+    owner_file = rt.computers.state_dir() / str(computer['id']) / "screen-owner.json"
+    screen.write_state(owner_file, {"turn_id": "private-grant-path", "until": time.time() + 60})
+    response = await api.get(path, params={"live": "false"})
+    assert response.json()["screen_busy"] is True
+    assert "private-grant-path" not in response.text
+    screen.write_state(owner_file, {"turn_id": "private-grant-path", "until": 0})
+    assert not (await api.get(path, params={"live": "false"})).json()["screen_busy"]

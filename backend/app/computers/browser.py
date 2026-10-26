@@ -75,10 +75,12 @@ class Browser:
             owner_path = s.state_dir / "screen-owner.json"
             owner = screen.read_state(owner_path)
             if owner.get("until", 0) > time.time() and owner.get("turn_id") != s.screen.turn_id:
-                return _text("Another conversation is using this screen. Wait until it finishes.", error=True)
+                s.screen.needs_observation = True
+                return _text(screen.BUSY_REFUSAL, error=True)
             if name in INPUT_NAMES:
                 if s.screen.actions >= s.screen.max_actions:
                     return _text("This turn reached its screen action limit.", error=True)
+                screen.write_state(s.state_dir / "screen-epoch.json", {"at": time.time_ns()})
                 s.screen.actions += 1
                 screen.write_state(owner_path, {"turn_id": s.screen.turn_id, "until": time.time()+60})
             epoch = screen.read_state(s.state_dir / "browser-epoch.json").get("at", 0)

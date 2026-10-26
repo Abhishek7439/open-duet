@@ -137,6 +137,7 @@ class Server:
         if not grants.consume(self.grants_dir, name, arguments):
             return _text(NOT_APPROVED, error=True)
         if name not in ("read_file", "list_files") and screen.held(self.state_dir):
+            self.screen.needs_observation = True
             return _text(screen.CONTROL_REFUSAL, error=True)
         if name in screen.DEFINITIONS:
             return self.screen.run(name, arguments)

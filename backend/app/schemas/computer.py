@@ -92,6 +92,7 @@ class ComputerResponse(ComputerSummary):
     container_id: str | None
     # A turn is using it now.
     busy: bool = False
+    screen_busy: bool = False
     desktop_ready: bool = False
     last_used_at: datetime | None
     last_command: LastCommandResponse | None = None

@@ -436,6 +436,7 @@ export type Computer = ComputerSummary & {
   guest_workspace: string;
   container_id: string | null;
   busy: boolean;
+  screen_busy?: boolean;
   last_used_at: string | null;
   last_command: ComputerLastCommand | null;
   health: ComputerHealth | null;
